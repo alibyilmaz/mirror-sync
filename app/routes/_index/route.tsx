@@ -93,18 +93,20 @@ export default function App() {
         </div>
 
         <section className={styles.hero}>
-          <span className={styles.eyebrow}>Inventory &amp; product sync</span>
-          <h1 className={styles.heading}>
-            Keep your stores in sync, without watching them.
-          </h1>
-          <p className={styles.tagline}>Sync you don&apos;t have to think about.</p>
-          <p className={styles.text}>
-            MirrorSync mirrors inventory and product data one way — source to
-            destination — between the Shopify stores you own. Reliability is the
-            whole product: duplicate and out-of-order events, other apps&apos;
-            writes, and API limits are all handled so your destination never
-            oversells and never silently drifts.
-          </p>
+          <div className={styles.heroText}>
+            <span className={styles.eyebrow}>Inventory &amp; product sync</span>
+            <h1 className={styles.heading}>
+              Keep your stores in sync, without watching them.
+            </h1>
+            <p className={styles.tagline}>Sync you don&apos;t have to think about.</p>
+            <p className={styles.text}>
+              MirrorSync mirrors inventory and product data one way — source to
+              destination — between the Shopify stores you own. Reliability is
+              the whole product: duplicate and out-of-order events, other
+              apps&apos; writes, and API limits are all handled so your
+              destination never oversells and never silently drifts.
+            </p>
+          </div>
 
           {showForm && (
             <div className={styles.card}>
