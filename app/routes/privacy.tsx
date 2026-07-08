@@ -78,7 +78,7 @@ export default function Privacy() {
 
       <h2>Contact</h2>
       <p>
-        Questions about this policy or your data: <a href="mailto:ali@cloudpeer.com">ali@cloudpeer.com</a>.
+        Questions about this policy or your data: <a href="mailto:mirrorsync@proton.me">mirrorsync@proton.me</a>.
       </p>
     </main>
   );

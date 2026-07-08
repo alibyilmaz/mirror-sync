@@ -59,8 +59,8 @@ Configure managed-pricing plans with these names (case-insensitive match):
   requests no customer-data scopes, so the PCD questionnaire is a quick "no
   customer data" path. Do not request `read_customers`/orders.
 - ⬜ **Emergency/support contact**, **support email**, **support URL**.
-- ⬜ **Privacy policy URL**: the `/privacy` page above (confirm the contact
-  email in `app/routes/privacy.tsx` — currently `ali@cloudpeer.com`).
+- ⬜ **Privacy policy URL**: the `/privacy` page above (contact:
+  `mirrorsync@proton.me`).
 - ⬜ **Demo store URL** + **review instructions**: give reviewers two dev
   stores already paired, and step-by-step: install on store A and B →
   Connections → generate code on A → redeem on B → watch import + a stock

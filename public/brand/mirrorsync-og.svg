@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  
+  <defs>
+    <pattern id="grid" width="45" height="45" patternUnits="userSpaceOnUse">
+      <path d="M45,0 L0,0 0,45" fill="none" stroke="rgba(255,255,255,0.045)" stroke-width="1"></path>
+    </pattern>
+    <clipPath id="iconClip"><rect x="90" y="150" width="330" height="330" rx="72"></rect></clipPath>
+  </defs>
+  <rect width="1200" height="630" fill="#0F1B2D"></rect>
+  <rect width="1200" height="630" fill="url(#grid)"></rect>
+  <g clip-path="url(#iconClip)">
+    <rect x="90" y="150" width="330" height="330" fill="#0F1B2D"></rect>
+    <line x1="255" y1="238" x2="255" y2="392" stroke="rgba(255,255,255,0.28)" stroke-width="2.75"></line>
+    <rect x="159.3" y="263.3" width="81.4" height="81.4" rx="17.6" fill="#14B8A6"></rect>
+    <rect x="272.3" y="266.3" width="75.35" height="75.35" rx="15.4" fill="none" stroke="#2DD4BF" stroke-width="6"></rect>
+    <line x1="227.5" y1="375.5" x2="271.5" y2="375.5" stroke="rgba(255,255,255,0.85)" stroke-width="4.4" stroke-linecap="round"></line>
+    <path d="M271.5,365.6 L286.9,375.5 L271.5,385.4 Z" fill="rgba(255,255,255,0.85)"></path>
+  </g>
+  <rect x="90" y="150" width="330" height="330" rx="72" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"></rect>
+  <text x="500" y="315" font-family="&#39;Space Grotesk&#39;, system-ui, sans-serif" font-weight="600" font-size="70" letter-spacing="-1.75" fill="#F2F5F9">Mirror<tspan fill="#14B8A6">Sync</tspan></text>
+  <text x="500" y="368" font-family="&#39;Space Grotesk&#39;, system-ui, sans-serif" font-weight="500" font-size="27" fill="rgba(242,245,249,0.62)">Sync you don&#39;t have to think about.</text>
+</svg>
