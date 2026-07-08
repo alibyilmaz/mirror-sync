@@ -15,4 +15,8 @@ COPY . .
 
 RUN npm run build && npm prune --omit=dev && npm cache clean --force
 
-CMD ["npm", "run", "docker-start"]
+RUN chmod +x docker-entrypoint.sh
+
+# Shell entrypoint that ends with `exec node server.mjs`: node gets PID 1
+# and receives SIGTERM, so the queue worker drains gracefully on deploys.
+CMD ["./docker-entrypoint.sh"]
