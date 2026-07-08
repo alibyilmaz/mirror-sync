@@ -9,7 +9,11 @@ ENV NODE_ENV=production
 
 COPY package.json package-lock.json* ./
 
-RUN npm ci
+# npm install, not npm ci: the lockfile is generated on Windows and npm
+# pins some cross-platform optional deps (eslint's unrs-resolver wasm
+# binding -> @emnapi) to versions the Linux builder rejects under the strict
+# `npm ci` sync check. `npm install` re-resolves correctly for Linux.
+RUN npm install --no-audit --no-fund
 
 COPY . .
 
