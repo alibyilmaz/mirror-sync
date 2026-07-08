@@ -14,6 +14,7 @@ import {
 import {
   RateLimitedError,
   ShopApiError,
+  StaleWriteError,
   activateInventory,
   getInventoryAvailable,
   getProductSnapshot,
@@ -27,6 +28,10 @@ import { reconcileConnection } from "./reconcile.server";
 import { runInitialImport } from "./import.server";
 
 export { RateLimitedError };
+
+// In-job re-read attempts when the destination changes mid-write. Beyond
+// this the SKU flows to the failure/pause path.
+const MAX_STALE_RETRIES = 3;
 
 export async function processJob(job: Job): Promise<void> {
   switch (job.type) {
@@ -190,23 +195,42 @@ async function syncOneInventoryLevel(params: {
   const locationGid = toGid("Location", destLocationId);
 
   try {
-    const destCurrent = await getInventoryAvailable(destDomain, itemGid, locationGid);
-    const decision = decideWrite(target, destCurrent);
-    if (!decision.write) return;
+    let observed = await getInventoryAvailable(destDomain, itemGid, locationGid);
+    const before = observed;
+    // Optimistic-concurrency loop: write with compareQuantity = the value we
+    // just read; if the destination changed underneath us, re-read and retry
+    // a bounded number of times. If it keeps changing, StaleWriteError falls
+    // through to the failure path, which pauses the SKU after 3 — exactly
+    // the "something else is fighting over this inventory" oversell guard.
+    for (let staleRetries = 0; ; staleRetries++) {
+      const decision = decideWrite(target, observed);
+      if (!decision.write) return; // already correct (possibly after a concurrent change)
 
-    if (destCurrent === null) {
-      // Item isn't stocked at the destination location yet: activate it
-      // there with the initial quantity (setting quantities would fail).
-      await activateInventory(destDomain, itemGid, locationGid, target);
-    } else {
-      await setInventoryAvailable(
-        destDomain,
-        itemGid,
-        locationGid,
-        target,
-        `https://mirrorsync.app/sync/${connection.id}/${mapping.id}`,
-      );
+      if (observed === null) {
+        // Item isn't stocked at the destination location yet: activate it
+        // there with the initial quantity (setting quantities would fail).
+        await activateInventory(destDomain, itemGid, locationGid, target);
+        break;
+      }
+      try {
+        await setInventoryAvailable(
+          destDomain,
+          itemGid,
+          locationGid,
+          target,
+          `https://mirrorsync.app/sync/${connection.id}/${mapping.id}`,
+          observed,
+        );
+        break;
+      } catch (e) {
+        if (e instanceof StaleWriteError && staleRetries < MAX_STALE_RETRIES) {
+          observed = await getInventoryAvailable(destDomain, itemGid, locationGid);
+          continue;
+        }
+        throw e;
+      }
     }
+    const destCurrent = before;
     await prisma.$transaction([
       prisma.echoWrite.create({
         data: {

@@ -5,6 +5,7 @@ import { shouldPauseAfterDrift, shouldPauseAfterFailure, targetQuantity } from "
 import { MANUAL_PAUSE_REASON } from "../pause";
 import {
   RateLimitedError,
+  StaleWriteError,
   activateInventory,
   getInventoryAvailableBatch,
   setInventoryAvailable,
@@ -130,10 +131,17 @@ export async function reconcileConnection(job: ReconcileConnectionJob): Promise<
               destLocationGid,
               target,
               `https://mirrorsync.app/reconcile/${conn.id}/${mapping.id}`,
+              destCurrent, // compareQuantity: the value this batch read
             );
           }
         } catch (e) {
           if (e instanceof RateLimitedError) throw e; // shelve the whole job
+          if (e instanceof StaleWriteError) {
+            // Destination changed while we were repairing — the batch read is
+            // stale. Skip this SKU; the next hourly pass (or the webhook that
+            // caused the change) reconciles it. Not a failure.
+            continue;
+          }
           failed++;
           failedIds.add(mapping.id);
           const message = e instanceof Error ? e.message : String(e);

@@ -95,6 +95,18 @@ challenge until a real install provides a session token. The worker connects
 to Supabase and polls pgmq immediately — enqueue a job and watch the queue
 drain (`SELECT queue_length FROM pgmq.metrics('sync_jobs')`).
 
+## Before App Store submission
+
+- Bump the Admin API version (`shopify.app.toml` `[webhooks].api_version`
+  and `ApiVersion` in `app/shopify.server.ts`) to the current stable and
+  re-verify the mutations in `app/lib/sync/admin.server.ts` — `2025-10` is
+  supported through 2026 but will sunset.
+- Set a real `application_url` in `shopify.app.toml` (the hosting URL). In
+  dev the CLI overrides it with the tunnel; it must be real for deploy.
+- Known limits to document or lift: `getProductSnapshot` reads
+  `variants(first: 250)`, so products with 250+ variants can miss a price
+  diff; `products/update` webhook payloads cap variants at 100.
+
 ## Deploy (Fly.io/Railway)
 
 The Dockerfile builds the app and the worker bundle. The container runs
@@ -112,12 +124,16 @@ volumes involved.
 2. The worker reads jobs, rejects stale events via `ResourceVersion`
    watermarks, fans out to connections, and writes diffs only — reading the
    destination first, skipping no-ops, tagging its own writes (`EchoWrite`).
-3. Failures retry with exponential backoff (pgmq visibility timeout); after
+3. Inventory writes use `inventorySetQuantities` with `compareQuantity` set
+   to the value just read, so a concurrent change is rejected
+   (`COMPARE_QUANTITY_STALE`) rather than blindly overwritten; the write
+   re-reads and retries, and sustained contention pauses the SKU.
+4. Failures retry with exponential backoff (pgmq visibility timeout); after
    5 attempts the job is archived to `DeadLetter` and surfaced in the UI.
    Rate limiting is budgeted per shop from the GraphQL cost extension and
    never counts as a failed attempt.
-4. `pg_cron` enqueues an hourly reconcile job per active connection; drift
+5. `pg_cron` enqueues an hourly reconcile job per active connection; drift
    is repaired and every fix is written to the `AuditLog` in plain English.
-5. First pairing runs a Bulk Operations export of both catalogs, matches
+6. First pairing runs a Bulk Operations export of both catalogs, matches
    variants by SKU then barcode (ambiguous values are skipped, never
    guessed), links locations, then does an initial reconcile pass.

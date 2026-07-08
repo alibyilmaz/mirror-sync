@@ -20,6 +20,15 @@ export class ShopApiError extends Error {
   }
 }
 
+// The destination's quantity changed between our read and our write
+// (inventorySetQuantities compareQuantity guard). The caller re-reads and
+// retries so we never blindly stomp a concurrent change.
+export class StaleWriteError extends Error {
+  constructor() {
+    super("Destination inventory changed between read and write");
+  }
+}
+
 // Minimum cost points we want in the bucket before making a call. A single
 // query costs <20, mutations ~10; 100 leaves room for a burst.
 const MIN_BUDGET = 100;
@@ -142,37 +151,47 @@ export async function getInventoryAvailable(
   return quantities?.find((q) => q.name === "available")?.quantity ?? null;
 }
 
+// Optimistic concurrency: compareQuantity is the value we read a moment
+// ago. If the destination changed since (another app, a manual edit),
+// Shopify rejects with COMPARE_QUANTITY_STALE instead of overwriting, and
+// we surface StaleWriteError so the caller re-reads. This closes the
+// read-then-write race the reconcile loop would otherwise have to clean up.
 export async function setInventoryAvailable(
   shop: string,
   inventoryItemGid: string,
   locationGid: string,
   quantity: number,
   referenceUri: string,
+  compareQuantity: number,
 ): Promise<void> {
   const data = await graphql<{
     inventorySetQuantities: {
-      userErrors: { field?: string[] | null; message: string }[];
+      userErrors: { field?: string[] | null; message: string; code?: string }[];
     };
   }>(
     shop,
     `#graphql
     mutation mirrorSyncSetAvailable($input: InventorySetQuantitiesInput!) {
       inventorySetQuantities(input: $input) {
-        userErrors { field message }
+        userErrors { field message code }
       }
     }`,
     {
       input: {
         name: "available",
         reason: "correction",
-        ignoreCompareQuantity: true,
         referenceDocumentUri: referenceUri,
-        quantities: [{ inventoryItemId: inventoryItemGid, locationId: locationGid, quantity }],
+        quantities: [
+          { inventoryItemId: inventoryItemGid, locationId: locationGid, quantity, compareQuantity },
+        ],
       },
     },
   );
   const errors = data.inventorySetQuantities.userErrors;
   if (errors.length > 0) {
+    if (errors.some((e) => e.code === "COMPARE_QUANTITY_STALE")) {
+      throw new StaleWriteError();
+    }
     throw new ShopApiError(
       `inventorySetQuantities failed: ${errors.map((e) => e.message).join("; ")}`,
       errors,
