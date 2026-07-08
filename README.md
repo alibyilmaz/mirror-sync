@@ -45,7 +45,11 @@ What makes it reliable (and different from the usual sync apps):
 4. **Migrations**: `npx prisma migrate deploy` (creates tables, pgmq queues
    and the pg_cron schedules).
 5. **Managed pricing**: configure plans named `Free`, `Starter`, `Growth`,
-   `Scale` in the Dev Dashboard (limits in `app/lib/plans.server.ts`).
+   `Scale` in the app's pricing section of the dashboard (limits in
+   `app/lib/plans.server.ts`). Note: plan detection currently uses the
+   Admin API `currentAppInstallation.activeSubscriptions` query, which
+   Shopify is superseding with the Partner API `activeSubscription` query
+   ("Shopify App Pricing", 2026) — see the note in `plans.server.ts`.
 
 ## Development
 

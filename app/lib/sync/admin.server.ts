@@ -45,29 +45,38 @@ export async function graphql<T = unknown>(
   await checkBudget(shop);
 
   const { admin } = await unauthenticated.admin(shop);
-  const response = await admin.graphql(query, variables ? { variables } : undefined);
-  const body = (await response.json()) as {
-    data?: T;
-    errors?: { message: string; extensions?: { code?: string } }[];
-    extensions?: CostExtensions;
-  };
+  let body: { data?: T; extensions?: CostExtensions };
+  try {
+    const response = await admin.graphql(query, variables ? { variables } : undefined);
+    body = (await response.json()) as typeof body;
+  } catch (e) {
+    // Top-level GraphQL errors are never returned in the body: the
+    // underlying client throws a GraphqlQueryError carrying them in
+    // error.body. Duck-typed (not instanceof) so we don't import from a
+    // transitive package.
+    const errBody = (e as { body?: { errors?: { message?: string; extensions?: { code?: string } }[]; extensions?: CostExtensions } })?.body;
+    if (errBody?.errors?.length) {
+      const throttleStatus = errBody.extensions?.cost?.throttleStatus;
+      if (throttleStatus) await saveBudget(shop, throttleStatus);
+      const throttled = errBody.errors.some((err) => err.extensions?.code === "THROTTLED");
+      if (throttled) {
+        const wait = throttleStatus
+          ? Math.ceil(
+              ((errBody.extensions?.cost?.requestedQueryCost ?? MIN_BUDGET) -
+                throttleStatus.currentlyAvailable) /
+                Math.max(1, throttleStatus.restoreRate),
+            )
+          : 5;
+        throw new RateLimitedError(Math.max(1, wait));
+      }
+      throw new ShopApiError(errBody.errors.map((err) => err.message ?? "GraphQL error").join("; "));
+    }
+    throw e;
+  }
 
   const throttleStatus = body.extensions?.cost?.throttleStatus;
   if (throttleStatus) await saveBudget(shop, throttleStatus);
 
-  if (body.errors?.length) {
-    const throttled = body.errors.find((e) => e.extensions?.code === "THROTTLED");
-    if (throttled) {
-      const wait = throttleStatus
-        ? Math.ceil(
-            (body.extensions!.cost!.requestedQueryCost - throttleStatus.currentlyAvailable) /
-              Math.max(1, throttleStatus.restoreRate),
-          )
-        : 5;
-      throw new RateLimitedError(Math.max(1, wait));
-    }
-    throw new ShopApiError(body.errors.map((e) => e.message).join("; "));
-  }
   if (!body.data) throw new ShopApiError("Empty GraphQL response");
   return body.data;
 }

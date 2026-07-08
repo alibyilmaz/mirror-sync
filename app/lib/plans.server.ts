@@ -25,6 +25,13 @@ export function upgradeUrl(shopDomain: string): string {
 // Reads the active managed-pricing subscription and caches it on Shop.plan.
 // Falls back to the cached value if the API call fails (billing must never
 // take sync down).
+//
+// NOTE (verified 2026-07): "Shopify App Pricing" (successor of managed
+// pricing, ~May 2026) moves subscription reads to the Partner API
+// activeSubscription(appId:, shopId:) query; currentAppInstallation is on
+// a deprecation path but still returns data today. Migrate before Shopify
+// announces a cutoff. Also: dev stores may return an empty
+// activeSubscriptions list despite an active plan (falls back to "free").
 export async function refreshPlan(shopDomain: string): Promise<string> {
   try {
     const data = await graphql<{
