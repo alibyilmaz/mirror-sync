@@ -6,6 +6,7 @@ import {
   decideWrite,
   diffProductFields,
   isEmptyProductDiff,
+  isOwnEcho,
   shouldPauseAfterFailure,
   targetQuantity,
   ECHO_TTL_MS,
@@ -94,6 +95,28 @@ async function handleInventoryLevelUpdate(job: WebhookJob): Promise<void> {
   const versionCheck = checkVersion(version, payloadHash, mark);
   if (!versionCheck.ok) return;
 
+  // Origin tagging (inbound): if this webhook reports exactly the value we
+  // ourselves wrote to this shop's item moments ago, it's the echo of our
+  // own write — don't re-propagate it (that's how a chain A→B→C could
+  // otherwise loop). A genuine third-party change carries a different value
+  // and passes straight through. We still advance the watermark so the
+  // echo isn't reconsidered.
+  const recentEcho = await prisma.echoWrite.findFirst({
+    where: {
+      shopDomain: job.shop,
+      resourceType: "inventory",
+      resourceKey: sourceKey,
+      writtenAt: { gte: new Date(Date.now() - ECHO_TTL_MS) },
+    },
+    orderBy: { writtenAt: "desc" },
+  });
+  // EchoWrite stores stableHash(value) of the bare quantity we wrote, so
+  // compare against the same shape (not payloadHash, which hashes an object).
+  if (isOwnEcho(stableHash(p.available), recentEcho, new Date())) {
+    await upsertWatermark(job.shop, "inventory", sourceKey, version, payloadHash);
+    return;
+  }
+
   const connections = await prisma.connection.findMany({
     where: {
       sourceShop: { domain: job.shop },
@@ -132,13 +155,16 @@ async function handleInventoryLevelUpdate(job: WebhookJob): Promise<void> {
     }
   }
 
-  // Watermark moves forward only after processing, so a transient failure
-  // followed by a retry is not mistaken for a duplicate.
-  await upsertWatermark(job.shop, "inventory", sourceKey, version, payloadHash);
-
+  // Advance the watermark ONLY when every connection succeeded. If any
+  // write failed we re-throw so the worker retries the identical event —
+  // and the retry must NOT be rejected as a duplicate, so the watermark
+  // stays where it was. (Reprocessing the connections that already
+  // succeeded is a safe no-op: decideWrite skips destinations that already
+  // hold the target value.)
   if (failures.length > 0) {
     throw failures[0] instanceof Error ? failures[0] : new Error(String(failures[0]));
   }
+  await upsertWatermark(job.shop, "inventory", sourceKey, version, payloadHash);
 }
 
 async function syncOneInventoryLevel(params: {
@@ -165,23 +191,7 @@ async function syncOneInventoryLevel(params: {
 
   try {
     const destCurrent = await getInventoryAvailable(destDomain, itemGid, locationGid);
-    const recentEcho = await prisma.echoWrite.findFirst({
-      where: {
-        shopDomain: destDomain,
-        resourceType: "inventory",
-        resourceKey: destKey,
-        writtenAt: { gte: new Date(Date.now() - ECHO_TTL_MS) },
-      },
-      orderBy: { writtenAt: "desc" },
-    });
-
-    const decision = decideWrite({
-      target,
-      destCurrent,
-      recentEcho,
-      targetHash,
-      now: new Date(),
-    });
+    const decision = decideWrite(target, destCurrent);
     if (!decision.write) return;
 
     if (destCurrent === null) {
@@ -328,38 +338,53 @@ async function handleProductUpdate(job: WebhookJob): Promise<void> {
   const failures: unknown[] = [];
   for (const conn of connections) {
     if (conn.mappings.length === 0) continue;
-    const destProductId = conn.mappings[0].destProductId;
-    if (!destProductId) continue;
 
-    try {
-      await syncProductFields({
-        connectionId: conn.id,
-        destDomain: conn.destShop.domain,
-        destProductGid: toGid("Product", destProductId),
-        sourceProductGid: toGid("Product", p.id),
-        settings: {
-          syncTitle: conn.syncTitle,
-          syncPrice: conn.syncPrice,
-          syncTags: conn.syncTags,
-          metafieldNamespaces: conn.metafieldNamespaces,
-        },
-        source: { title: p.title, tags: sourceTags, variantPrices: sourcePrices },
-        variantMap: new Map(
-          conn.mappings.map((m) => [m.sourceVariantId, m.destVariantId]),
-        ),
-        sourceDomain: job.shop,
-      });
-    } catch (e) {
-      if (e instanceof RateLimitedError) throw e;
-      failures.push(e);
+    // Variants of one source product can map to DIFFERENT destination
+    // products (matching is per-variant, and merchants can move variants
+    // between products). Group by destination product and sync each
+    // separately — otherwise a variant belonging to product Y would be
+    // pushed into product X's update and rejected.
+    const byDestProduct = new Map<bigint, typeof conn.mappings>();
+    for (const m of conn.mappings) {
+      if (m.destProductId === null) continue;
+      const list = byDestProduct.get(m.destProductId) ?? [];
+      list.push(m);
+      byDestProduct.set(m.destProductId, list);
+    }
+
+    for (const [destProductId, group] of byDestProduct) {
+      try {
+        await syncProductFields({
+          connectionId: conn.id,
+          destDomain: conn.destShop.domain,
+          destProductGid: toGid("Product", destProductId),
+          sourceProductGid: toGid("Product", p.id),
+          settings: {
+            syncTitle: conn.syncTitle,
+            syncPrice: conn.syncPrice,
+            syncTags: conn.syncTags,
+            metafieldNamespaces: conn.metafieldNamespaces,
+          },
+          source: { title: p.title, tags: sourceTags, variantPrices: sourcePrices },
+          variantMap: new Map(group.map((m) => [m.sourceVariantId, m.destVariantId])),
+          sourceDomain: job.shop,
+        });
+      } catch (e) {
+        if (e instanceof RateLimitedError) throw e;
+        failures.push(e);
+      }
     }
   }
 
-  await upsertWatermark(job.shop, "product", resourceKey, version, payloadHash);
-
+  // Watermark advances only on a fully clean pass (see the inventory
+  // handler for why): a failed field write must be retryable, not
+  // duplicate-rejected. Product fields have no reconcile safety net, so
+  // this is the only thing standing between a transient error and a
+  // permanently lost price/title change.
   if (failures.length > 0) {
     throw failures[0] instanceof Error ? failures[0] : new Error(String(failures[0]));
   }
+  await upsertWatermark(job.shop, "product", resourceKey, version, payloadHash);
 }
 
 async function syncProductFields(params: {

@@ -17,21 +17,74 @@ function canonicalJson(value: unknown): string {
 
 // Shopify's own webhook examples use IDs above Number.MAX_SAFE_INTEGER
 // (e.g. inventory_item_id 271878346596884015), so a plain JSON.parse would
-// silently corrupt them. Integers that don't fit a double are kept as
-// strings (BigInt() accepts both shapes downstream).
+// silently corrupt them. We pre-scan the RAW text and wrap any oversized
+// integer literal in quotes, so it parses as a string (BigInt() accepts
+// both shapes downstream).
+//
+// Done as a string transform on purpose: the JSON.parse reviver's
+// `context.source` argument only exists on Node 22+, and this app can run
+// on Node 20 — there the reviver approach silently no-ops and corrupts IDs.
+// This scanner works on every version.
 export function parseJsonPreservingBigInts(text: string): unknown {
-  return JSON.parse(text, function (this: unknown, _key, value, context?: { source?: string }) {
-    if (
-      typeof value === "number" &&
-      Number.isInteger(value) &&
-      !Number.isSafeInteger(value) &&
-      context?.source &&
-      /^-?\d+$/.test(context.source)
-    ) {
-      return context.source;
+  return JSON.parse(quoteOversizedIntegers(text));
+}
+
+function quoteOversizedIntegers(text: string): string {
+  let out = "";
+  let i = 0;
+  let inString = false;
+  while (i < text.length) {
+    const ch = text[i];
+    if (inString) {
+      out += ch;
+      if (ch === "\\") {
+        // Copy the escaped char verbatim so a `\"` doesn't end the string.
+        out += text[i + 1] ?? "";
+        i += 2;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      i += 1;
+      continue;
     }
-    return value;
-  } as (key: string, value: unknown) => unknown);
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      i += 1;
+      continue;
+    }
+    // A number literal can only start here if the previous non-space
+    // structural char was one that precedes a value (: , [ or start).
+    if ((ch >= "0" && ch <= "9") || (ch === "-" && isNumberStart(out))) {
+      let j = i;
+      if (text[j] === "-") j += 1;
+      const digitsStart = j;
+      while (j < text.length && text[j] >= "0" && text[j] <= "9") j += 1;
+      const isPureInteger = j < text.length ? !".eE".includes(text[j]) : true;
+      const literal = text.slice(i, j);
+      if (isPureInteger && j > digitsStart && !isSafeIntegerLiteral(literal)) {
+        out += `"${literal}"`;
+      } else {
+        out += literal;
+      }
+      i = j;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
+function isNumberStart(outSoFar: string): boolean {
+  // '-' begins a number only in value position (after : , [ or at start).
+  const prev = outSoFar.replace(/\s+$/, "").slice(-1);
+  return prev === "" || prev === ":" || prev === "," || prev === "[";
+}
+
+function isSafeIntegerLiteral(literal: string): boolean {
+  const n = Number(literal);
+  return Number.isSafeInteger(n);
 }
 
 // GraphQL GIDs <-> numeric IDs (webhook payloads are REST-shaped and numeric).

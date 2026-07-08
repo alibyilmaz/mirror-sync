@@ -4,6 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import { checkPlanLimit } from "../lib/plans.server";
+import { MANUAL_PAUSE_REASON } from "../lib/pause";
 
 async function loadConnectionForShop(connectionId: string | undefined, shopDomain: string) {
   if (!connectionId) throw new Response("Not found", { status: 404 });
@@ -80,7 +81,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     if (intent === "pause-mapping") {
       await db.mapping.update({
         where: { id: mapping.id },
-        data: { status: "paused", pauseReason: "Paused manually", pausedAt: new Date() },
+        // MANUAL_PAUSE_REASON marks this as a deliberate pause so a
+        // connection-wide "Resync now" won't silently un-pause it.
+        data: { status: "paused", pauseReason: MANUAL_PAUSE_REASON, pausedAt: new Date() },
       });
       return { ok: true };
     }

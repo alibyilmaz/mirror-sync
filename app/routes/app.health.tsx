@@ -208,6 +208,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
     if (!deadLetterRow) return { error: "That job was not found." };
+    // Already retried/discarded rows can't be retried again (the worker
+    // would no-op behind a misleading toast).
+    if (deadLetterRow.status !== "dead") {
+      return { error: "That job was already retried." };
+    }
     await enqueue(QUEUES.sync, { type: "retry_dead_letter", deadLetterId });
     return { message: "Retry queued." };
   }
@@ -216,6 +221,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const connectionId = String(form.get("connectionId") ?? "");
     const connection = await findOwnedConnection(connectionId, session.shop);
     if (!connection) return { error: "That connection was not found." };
+    // A disabled connection (uninstall/unpair) must never be silently
+    // revived here: pairing is where the acyclic-graph check runs, so
+    // reviving A→B while B→A exists would create a sync loop. Re-pair it.
+    if (connection.status === "disabled") {
+      return {
+        error:
+          "This connection was disabled. Reconnect the stores from the Connections page to start over.",
+      };
+    }
+    // Fresh attempt: clear prior import rows so stepStart starts clean and
+    // stepMatch/latestImports never mix an old export with a new one.
+    await db.bulkImport.deleteMany({ where: { connectionId } });
     await db.connection.update({
       where: { id: connectionId },
       data: { status: "importing" },
@@ -392,7 +409,9 @@ export default function Health() {
         <s-section heading="Paused SKUs">
           <s-paragraph>
             These items stopped syncing after repeated problems. Resync an item
-            to re-check its numbers and turn syncing back on.
+            to re-check its numbers and turn syncing back on. Items marked
+            “broken” lost their source product (it was deleted) — re-create the
+            product and run “Restart import”, or remove the mapping.
           </s-paragraph>
           <s-table>
             <s-table-header-row>
@@ -414,24 +433,31 @@ export default function Health() {
                   <s-table-cell>{m.pauseReason ?? "—"}</s-table-cell>
                   <s-table-cell>{formatWhen(m.pausedAt)}</s-table-cell>
                   <s-table-cell>
-                    <s-button
-                      variant="tertiary"
-                      onClick={() =>
-                        act.submit(
-                          {
-                            intent: "resync-mapping",
-                            connectionId: m.connectionId,
-                            mappingId: m.id,
-                          },
-                          { method: "post" },
-                        )
-                      }
-                      {...(submitting("resync-mapping", "mappingId", m.id)
-                        ? { loading: true }
-                        : {})}
-                    >
-                      Resync now
-                    </s-button>
+                    {m.status === "broken" ? (
+                      // A broken mapping (source product deleted) can't be
+                      // resynced — reconcile skips it. Don't offer a button
+                      // that would no-op behind a success toast.
+                      <s-text tone="neutral">Re-import to fix</s-text>
+                    ) : (
+                      <s-button
+                        variant="tertiary"
+                        onClick={() =>
+                          act.submit(
+                            {
+                              intent: "resync-mapping",
+                              connectionId: m.connectionId,
+                              mappingId: m.id,
+                            },
+                            { method: "post" },
+                          )
+                        }
+                        {...(submitting("resync-mapping", "mappingId", m.id)
+                          ? { loading: true }
+                          : {})}
+                      >
+                        Resync now
+                      </s-button>
+                    )}
                   </s-table-cell>
                 </s-table-row>
               ))}

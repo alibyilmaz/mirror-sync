@@ -2,6 +2,7 @@ import prisma from "../../db.server";
 import type { ReconcileConnectionJob } from "../jobs";
 import { inventoryKey, stableHash, toGid } from "../util";
 import { shouldPauseAfterDrift, shouldPauseAfterFailure, targetQuantity } from "./decisions";
+import { MANUAL_PAUSE_REASON } from "../pause";
 import {
   RateLimitedError,
   activateInventory,
@@ -22,9 +23,21 @@ export async function reconcileConnection(job: ReconcileConnectionJob): Promise<
     where: { id: job.connectionId },
     include: { sourceShop: true, destShop: true, locationLinks: true },
   });
-  if (!conn || conn.status === "disabled" || conn.status === "importing") return;
+  if (!conn) return;
   if (conn.sourceShop.uninstalledAt || conn.destShop.uninstalledAt) return;
   if (!conn.syncInventory) return;
+  // Scheduled (hourly) runs only touch fully active connections — a paused
+  // connection (plan-limit overage, failed import) must NOT keep writing
+  // inventory every hour, or plan enforcement is void and merchant fixes
+  // get overwritten. A manual "Resync now" is the deliberate recovery path
+  // and may run on a paused connection.
+  if (conn.status === "disabled" || conn.status === "importing") return;
+  if (conn.status !== "active" && !job.manual) return;
+
+  // Targeted resync (per-SKU "Resync now") explicitly revives the SKU the
+  // merchant clicked. A connection-wide manual resync must NOT revive SKUs
+  // the merchant paused on purpose from the Mappings page.
+  const targeted = Boolean(job.mappingIds && job.mappingIds.length > 0);
 
   const mappings = await prisma.mapping.findMany({
     where: {
@@ -33,6 +46,9 @@ export async function reconcileConnection(job: ReconcileConnectionJob): Promise<
       // Manual resync also picks up paused SKUs (that's the recovery path);
       // scheduled runs only check active ones. Broken stays broken.
       status: job.manual ? { in: ["active", "paused"] } : "active",
+      // Connection-wide manual resync skips deliberately-paused SKUs;
+      // a targeted resync of that exact SKU overrides.
+      ...(job.manual && !targeted ? { NOT: { pauseReason: MANUAL_PAUSE_REASON } } : {}),
     },
     orderBy: { id: "asc" },
   });
@@ -42,6 +58,7 @@ export async function reconcileConnection(job: ReconcileConnectionJob): Promise<
   let paused = 0;
   let revived = 0;
   let failed = 0;
+  const failedIds = new Set<string>();
 
   for (const link of conn.locationLinks) {
     const sourceLocationGid = toGid("Location", link.sourceLocationId);
@@ -68,17 +85,35 @@ export async function reconcileConnection(job: ReconcileConnectionJob): Promise<
 
         const target = targetQuantity(sourceAvailable, conn.safetyStockBuffer);
         if (destCurrent === target) {
-          if (job.manual && mapping.status === "paused") {
-            await revive(mapping.id);
-            revived++;
+          // In sync. Clear any stale counters on an active SKU so isolated
+          // failures/drift weeks apart never accumulate into a false pause.
+          // Manual-paused revival is handled by the sweep after the loop.
+          if (mapping.status === "active" && (mapping.failureCount > 0 || mapping.driftCount > 0)) {
+            await prisma.mapping.updateMany({
+              where: { id: mapping.id },
+              data: { failureCount: 0, driftCount: 0, lastSyncedAt: new Date() },
+            });
           }
           continue;
         }
 
-        // Drift found. Repair it, count it, and pause the SKU if it keeps
-        // drifting (something else is fighting over this inventory).
+        // Drift found. The mapping may have been unlinked or re-pointed from
+        // the dashboard since we snapshotted the batch; re-read it before
+        // writing so a stray repair never lands on a deleted or wrong
+        // destination item.
+        const live = await prisma.mapping.findUnique({ where: { id: mapping.id } });
+        if (
+          !live ||
+          live.status === "broken" ||
+          live.destInventoryItemId !== mapping.destInventoryItemId
+        ) {
+          continue;
+        }
+
         // One broken SKU must not sink the whole pass: repair errors are
-        // recorded per mapping and the loop moves on.
+        // recorded per mapping and the loop moves on. All mapping writes use
+        // updateMany so a row deleted mid-pass updates 0 rows instead of
+        // throwing P2025 and aborting the transaction.
         try {
           if (destCurrent === null || destCurrent === undefined) {
             // Not stocked at the destination location yet.
@@ -100,11 +135,12 @@ export async function reconcileConnection(job: ReconcileConnectionJob): Promise<
         } catch (e) {
           if (e instanceof RateLimitedError) throw e; // shelve the whole job
           failed++;
+          failedIds.add(mapping.id);
           const message = e instanceof Error ? e.message : String(e);
           const failureCount = mapping.failureCount + 1;
           const pauseNow = shouldPauseAfterFailure(failureCount);
           await prisma.$transaction([
-            prisma.mapping.update({
+            prisma.mapping.updateMany({
               where: { id: mapping.id },
               data: pauseNow
                 ? {
@@ -140,7 +176,7 @@ export async function reconcileConnection(job: ReconcileConnectionJob): Promise<
               valueHash: stableHash(target),
             },
           }),
-          prisma.mapping.update({
+          prisma.mapping.updateMany({
             where: { id: mapping.id },
             data: shouldPause
               ? {
@@ -151,7 +187,7 @@ export async function reconcileConnection(job: ReconcileConnectionJob): Promise<
                 }
               : job.manual
                 ? { driftCount: 0, failureCount: 0, status: "active", pausedAt: null, pauseReason: null, lastSyncedAt: new Date() }
-                : { driftCount, lastSyncedAt: new Date() },
+                : { driftCount, failureCount: 0, lastSyncedAt: new Date() },
           }),
           prisma.auditLog.create({
             data: {
@@ -167,8 +203,26 @@ export async function reconcileConnection(job: ReconcileConnectionJob): Promise<
         ]);
         repaired++;
         if (shouldPause) paused++;
-        if (job.manual && mapping.status === "paused") revived++;
       }
+    }
+  }
+
+  // Manual resync is the recovery path: resume every paused SKU in the
+  // working set that didn't fail this run — including ones whose source
+  // isn't stocked at any linked location (no drift to trigger inline
+  // revival), so the one-click recovery advertised in the pause message
+  // always does something. (Deliberately manual-paused SKUs were already
+  // excluded from the working set unless explicitly targeted.)
+  if (job.manual) {
+    const reviveIds = mappings
+      .filter((m) => m.status === "paused" && !failedIds.has(m.id))
+      .map((m) => m.id);
+    if (reviveIds.length > 0) {
+      const res = await prisma.mapping.updateMany({
+        where: { id: { in: reviveIds }, status: "paused" },
+        data: { status: "active", pausedAt: null, pauseReason: null, driftCount: 0, failureCount: 0 },
+      });
+      revived += res.count;
     }
   }
 
@@ -190,13 +244,6 @@ export async function reconcileConnection(job: ReconcileConnectionJob): Promise<
         ? `Manual resync finished: ${checked} SKUs checked, ${repaired} corrected, ${revived} paused SKUs resumed${failed > 0 ? `, ${failed} could not be repaired (see entries above)` : ""}.`
         : `Hourly check finished: ${checked} SKUs compared, ${repaired} drifted and were corrected${paused > 0 ? `, ${paused} paused for repeated drift` : ""}${failed > 0 ? `, ${failed} could not be repaired` : ""}.`,
     },
-  });
-}
-
-async function revive(mappingId: string): Promise<void> {
-  await prisma.mapping.update({
-    where: { id: mappingId },
-    data: { status: "active", pausedAt: null, pauseReason: null, driftCount: 0, failureCount: 0 },
   });
 }
 

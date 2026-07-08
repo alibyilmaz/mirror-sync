@@ -6,6 +6,10 @@ import { QUEUES } from "./jobs";
 
 const CODE_TTL_MS = 15 * 60 * 1000;
 
+// Arbitrary constant key for the global pairing-graph advisory lock, so
+// concurrent redeems serialize their cycle-check-then-create.
+export const PAIRING_LOCK_KEY = 827641;
+
 export class PairingError extends Error {}
 
 // Generated on the SOURCE store; the merchant types it into the destination.
@@ -49,28 +53,38 @@ export async function redeemPairingCode(destDomain: string, rawCode: string) {
     throw new PairingError("The source store no longer has MirrorSync installed.");
   }
 
-  const existing = await prisma.connection.findUnique({
-    where: {
-      sourceShopId_destShopId: { sourceShopId: pairing.shopId, destShopId: destShop.id },
-    },
-  });
-  if (existing && existing.status !== "disabled") {
-    throw new PairingError("These stores are already connected in this direction.");
-  }
-
-  // Keep the connection graph acyclic — this is what makes sync loops
-  // impossible (see lib/graph.ts).
-  const edges = await prisma.connection.findMany({
-    where: { status: { not: "disabled" } },
-    select: { sourceShopId: true, destShopId: true },
-  });
-  if (wouldCreateCycle(edges, pairing.shopId, destShop.id)) {
-    throw new PairingError(
-      "This connection would create a sync loop (the destination already feeds the source, directly or through another store). MirrorSync only supports one-directional flows.",
-    );
-  }
-
   const connection = await prisma.$transaction(async (tx) => {
+    // Serialize ALL pairing-graph mutations. The cycle check is
+    // check-then-act: without this lock, two web requests redeeming the
+    // reverse direction (A→B and B→A) at the same time both read the graph
+    // before either commits, both see no cycle, and create A↔B — which the
+    // safety-stock buffer then ratchets to zero. Pairing is rare, so a
+    // single global advisory lock (held to commit) is fine.
+    // $executeRaw (not $queryRaw): the function returns void, which
+    // $queryRaw can't deserialize into a row.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${PAIRING_LOCK_KEY}::bigint)`;
+
+    const existing = await tx.connection.findUnique({
+      where: {
+        sourceShopId_destShopId: { sourceShopId: pairing.shopId, destShopId: destShop.id },
+      },
+    });
+    if (existing && existing.status !== "disabled") {
+      throw new PairingError("These stores are already connected in this direction.");
+    }
+
+    // Keep the connection graph acyclic — this is what makes sync loops
+    // impossible (see lib/graph.ts). Read edges inside the locked tx.
+    const edges = await tx.connection.findMany({
+      where: { status: { not: "disabled" } },
+      select: { sourceShopId: true, destShopId: true },
+    });
+    if (wouldCreateCycle(edges, pairing.shopId, destShop.id)) {
+      throw new PairingError(
+        "This connection would create a sync loop (the destination already feeds the source, directly or through another store). MirrorSync only supports one-directional flows.",
+      );
+    }
+
     // Claim the code atomically; a concurrent redeem of the same code loses.
     const claimed = await tx.pairingCode.updateMany({
       where: { id: pairing.id, usedAt: null },

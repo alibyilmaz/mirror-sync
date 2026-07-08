@@ -3,7 +3,12 @@ import type { InitialImportJob } from "../jobs";
 import { QUEUES } from "../jobs";
 import { enqueue } from "../queue.server";
 import { fromGid } from "../util";
-import { getBulkOperation, listLocations, startBulkExport } from "./admin.server";
+import {
+  getBulkOperation,
+  getCurrentBulkQuery,
+  listLocations,
+  startBulkExport,
+} from "./admin.server";
 import { checkPlanLimit } from "../plans.server";
 
 // First pairing: export the full catalog from both stores with Bulk
@@ -62,10 +67,31 @@ type Conn = NonNullable<
 async function stepStart(conn: Conn): Promise<void> {
   for (const side of ["source", "dest"] as const) {
     const shop = side === "source" ? conn.sourceShop.domain : conn.destShop.domain;
-    // One bulk query runs per shop at a time; if another is in flight
-    // (e.g. the same store pairing twice), Shopify rejects and the job
-    // retries with backoff — good enough.
-    const opId = await startBulkExport(shop, BULK_QUERY);
+
+    // Idempotent: if this attempt already kicked off (or finished) this
+    // side, don't start it again. Without this, a transient failure after
+    // the source export started makes every retry re-call startBulkExport,
+    // which Shopify rejects ("a bulk operation is already in progress")
+    // until the export finishes — often past the retry ladder, stranding
+    // the connection in 'importing' forever.
+    const already = await prisma.bulkImport.findFirst({
+      where: { connectionId: conn.id, side, status: { in: ["running", "completed"] } },
+    });
+    if (already) continue;
+
+    let opId: string;
+    try {
+      opId = await startBulkExport(shop, BULK_QUERY);
+    } catch (e) {
+      // Collision with an in-flight bulk query (ours from a prior attempt,
+      // or another app's): adopt the running one rather than failing.
+      const current = await getCurrentBulkQuery(shop);
+      if (current && (current.status === "RUNNING" || current.status === "CREATED")) {
+        opId = current.id;
+      } else {
+        throw e;
+      }
+    }
     await prisma.bulkImport.create({
       data: { connectionId: conn.id, side, bulkOperationId: opId, status: "running" },
     });
@@ -156,15 +182,13 @@ async function stepMatch(conn: Conn): Promise<void> {
   const bySku = indexUnique(destCatalog, (v) => normalize(v.sku));
   const byBarcode = indexUnique(destCatalog, (v) => normalize(v.barcode));
 
-  // Manual mappings survive re-imports untouched.
-  const manualVariantIds = new Set(
-    (
-      await prisma.mapping.findMany({
-        where: { connectionId: conn.id, matchType: "manual" },
-        select: { sourceVariantId: true },
-      })
-    ).map((m) => m.sourceVariantId.toString()),
-  );
+  // SOURCE-side duplicates matter too: Shopify allows the same SKU on
+  // multiple variants. Two source variants sharing a SKU would both map to
+  // the same destination variant and fight over its quantity forever, and
+  // reconcile would eventually pause both for "drift". Skip and flag them,
+  // exactly like destination ambiguity.
+  const sourceSkuDup = duplicatedKeys(sourceCatalog, (v) => normalize(v.sku));
+  const sourceBarcodeDup = duplicatedKeys(sourceCatalog, (v) => normalize(v.barcode));
 
   let matchedSku = 0;
   let matchedBarcode = 0;
@@ -172,14 +196,22 @@ async function stepMatch(conn: Conn): Promise<void> {
   let ambiguous = 0;
 
   for (const sv of sourceCatalog) {
-    let dv = bySku.unique.get(normalize(sv.sku) ?? "");
-    let matchType = "auto_sku";
-    if (!dv) {
-      dv = byBarcode.unique.get(normalize(sv.barcode) ?? "");
-      matchType = "auto_barcode";
-    }
     const skuKey = normalize(sv.sku);
     const barcodeKey = normalize(sv.barcode);
+
+    // Skip source variants whose SKU/barcode is duplicated on the SOURCE
+    // side (see sourceSkuDup above).
+    if ((skuKey && sourceSkuDup.has(skuKey)) || (barcodeKey && sourceBarcodeDup.has(barcodeKey))) {
+      ambiguous++;
+      continue;
+    }
+
+    let dv = skuKey ? bySku.unique.get(skuKey) : undefined;
+    let matchType = "auto_sku";
+    if (!dv) {
+      dv = barcodeKey ? byBarcode.unique.get(barcodeKey) : undefined;
+      matchType = "auto_barcode";
+    }
     if (!dv && ((skuKey && bySku.duplicates.has(skuKey)) || (barcodeKey && byBarcode.duplicates.has(barcodeKey)))) {
       ambiguous++;
       continue;
@@ -191,35 +223,47 @@ async function stepMatch(conn: Conn): Promise<void> {
     if (matchType === "auto_sku") matchedSku++;
     else matchedBarcode++;
 
-    await prisma.mapping.upsert({
+    // Manual mappings survive re-imports untouched — and the check must be
+    // at write time, not against a pre-loop snapshot, or a manual-map
+    // saved from the dashboard mid-import gets clobbered by the auto-match.
+    // updateMany re-reads matchType now; createMany(skipDuplicates) leaves
+    // any existing manual row alone.
+    const updated = await prisma.mapping.updateMany({
       where: {
-        connectionId_sourceVariantId: { connectionId: conn.id, sourceVariantId: sv.variantId },
-      },
-      create: {
         connectionId: conn.id,
+        sourceVariantId: sv.variantId,
+        matchType: { not: "manual" },
+      },
+      data: {
         sku: sv.sku,
         barcode: sv.barcode,
         sourceProductId: sv.productId,
-        sourceVariantId: sv.variantId,
         sourceInventoryItemId: sv.inventoryItemId,
         destProductId: dv.productId,
         destVariantId: dv.variantId,
         destInventoryItemId: dv.inventoryItemId,
         matchType,
       },
-      update: manualVariantIds.has(sv.variantId.toString())
-        ? {}
-        : {
+    });
+    if (updated.count === 0) {
+      await prisma.mapping.createMany({
+        data: [
+          {
+            connectionId: conn.id,
             sku: sv.sku,
             barcode: sv.barcode,
             sourceProductId: sv.productId,
+            sourceVariantId: sv.variantId,
             sourceInventoryItemId: sv.inventoryItemId,
             destProductId: dv.productId,
             destVariantId: dv.variantId,
             destInventoryItemId: dv.inventoryItemId,
             matchType,
           },
-    });
+        ],
+        skipDuplicates: true,
+      });
+    }
   }
 
   await autoLinkLocations(conn);
@@ -377,4 +421,20 @@ function indexUnique(
     unique.set(key, v);
   }
   return { unique, duplicates };
+}
+
+// Normalized keys that appear on more than one variant in a catalog.
+function duplicatedKeys(
+  catalog: CatalogVariant[],
+  keyOf: (v: CatalogVariant) => string | null,
+): Set<string> {
+  const seen = new Set<string>();
+  const dup = new Set<string>();
+  for (const v of catalog) {
+    const key = keyOf(v);
+    if (!key) continue;
+    if (seen.has(key)) dup.add(key);
+    else seen.add(key);
+  }
+  return dup;
 }

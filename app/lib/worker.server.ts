@@ -5,6 +5,8 @@ import {
   backoffSeconds,
   deadLetter,
   delay,
+  discard,
+  enqueue,
   readBatch,
   resolveJobShop,
   type QueueMessage,
@@ -64,15 +66,32 @@ async function handle(queue: QueueName, msg: QueueMessage): Promise<void> {
     await ack(queue, msg.msgId);
   } catch (e) {
     if (e instanceof RateLimitedError) {
-      // Not a failure: the shop's API budget is empty. Try again when the
-      // bucket has refilled; does not count against retry attempts.
-      await delay(queue, msg.msgId, e.retryAfterSeconds);
+      // Not a failure: the shop's API budget is empty. Shelving must NOT
+      // consume a retry attempt, but pgmq's read_ct only ever grows and
+      // set_vt can't reset it. So re-enqueue a fresh copy (read_ct starts
+      // over) with the wait as its delay, then drop the current message.
+      // Enqueue first: a crash in between leaves a harmless duplicate
+      // (idempotent), never a lost job.
+      await enqueue(queue, msg.job, e.retryAfterSeconds);
+      await discard(queue, msg.msgId);
       return;
     }
     const error = e instanceof Error ? (e.stack ?? e.message) : String(e);
     if (msg.readCt >= MAX_ATTEMPTS) {
       console.error(`[worker] job dead-lettered after ${msg.readCt} attempts`, error);
-      await deadLetter(queue, msg, error);
+      if (msg.job.type === "retry_dead_letter") {
+        // A retry that failed again must not spawn a nested dead-letter row
+        // pointing at the original. The original row is still 'dead'
+        // (processJob only marks it 'retried' on success), so just refresh
+        // its error and drop this wrapper message.
+        await prisma.deadLetter.updateMany({
+          where: { id: msg.job.deadLetterId, status: "dead" },
+          data: { error: `Retry failed again: ${error.slice(0, 3900)}` },
+        });
+        await discard(queue, msg.msgId);
+      } else {
+        await deadLetter(queue, msg, error);
+      }
       await prisma.auditLog.create({
         data: {
           shopDomain: await resolveJobShop(msg.job),

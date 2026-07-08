@@ -4,6 +4,8 @@ import {
   decideWrite,
   diffProductFields,
   isEmptyProductDiff,
+  isOwnEcho,
+  sameTags,
   shouldPauseAfterDrift,
   shouldPauseAfterFailure,
   targetQuantity,
@@ -64,71 +66,57 @@ describe("targetQuantity — oversell buffer", () => {
   });
 });
 
-describe("decideWrite — loop prevention", () => {
-  const now = t("2026-07-08T12:00:00Z");
-  const targetHash = stableHash(7);
-
+describe("decideWrite — write only when the destination differs", () => {
   it("skips when destination already has the target value (no-op)", () => {
-    expect(
-      decideWrite({ target: 7, destCurrent: 7, recentEcho: null, targetHash, now }),
-    ).toEqual({ write: false, reason: "noop" });
+    expect(decideWrite(7, 7)).toEqual({ write: false, reason: "noop" });
   });
 
-  it("skips when we ourselves recently wrote this exact value (own echo)", () => {
-    expect(
-      decideWrite({
-        target: 7,
-        destCurrent: null,
-        recentEcho: { valueHash: targetHash, writtenAt: t("2026-07-08T11:55:00Z") },
-        targetHash,
-        now,
-      }),
-    ).toEqual({ write: false, reason: "own-echo" });
+  it("writes when values differ", () => {
+    expect(decideWrite(7, 5)).toEqual({ write: true, target: 7 });
   });
 
-  it("writes when the echo record is older than the TTL", () => {
-    const old = new Date(now.getTime() - ECHO_TTL_MS - 1);
-    expect(
-      decideWrite({
-        target: 7,
-        destCurrent: 5,
-        recentEcho: { valueHash: targetHash, writtenAt: old },
-        targetHash,
-        now,
-      }),
-    ).toEqual({ write: true, target: 7 });
+  it("writes (activates) when the destination has no level yet", () => {
+    expect(decideWrite(7, null)).toEqual({ write: true, target: 7 });
   });
 
-  it("writes when the echo was for a different value", () => {
-    expect(
-      decideWrite({
-        target: 7,
-        destCurrent: 5,
-        recentEcho: { valueHash: stableHash(9), writtenAt: t("2026-07-08T11:59:00Z") },
-        targetHash,
-        now,
-      }),
-    ).toEqual({ write: true, target: 7 });
-  });
-
-  it("writes when values differ and there is no echo", () => {
-    expect(
-      decideWrite({ target: 7, destCurrent: 5, recentEcho: null, targetHash, now }),
-    ).toEqual({ write: true, target: 7 });
+  it("does NOT suppress a repair just because we once wrote this value", () => {
+    // The old outbound echo check wrongly blocked this: a third party set
+    // the destination to 5, and we must correct it back to 7 even though 7
+    // is a value we previously wrote. Loop-safety now lives inbound.
+    expect(decideWrite(7, 5)).toEqual({ write: true, target: 7 });
   });
 
   // The ping-pong scenario: A -> B and (misconfigured) B -> A. A=7 gets
   // written to B; B's webhook comes back toward A. A already has 7, so the
   // write decision is a no-op and the loop dies immediately.
   it("kills a two-store ping-pong via the no-op rule", () => {
-    const bounceBack = decideWrite({
-      target: 7,
-      destCurrent: 7, // A already holds the value it originally published
-      recentEcho: null,
-      targetHash,
-      now,
-    });
-    expect(bounceBack.write).toBe(false);
+    expect(decideWrite(7, 7).write).toBe(false);
+  });
+});
+
+describe("isOwnEcho — inbound origin tagging stops chains looping", () => {
+  const now = t("2026-07-08T12:00:00Z");
+  const hash7 = stableHash(7);
+
+  it("recognizes the echo of a value we just wrote to this shop", () => {
+    expect(isOwnEcho(hash7, { valueHash: hash7, writtenAt: t("2026-07-08T11:55:00Z") }, now)).toBe(
+      true,
+    );
+  });
+
+  it("ignores an echo record older than the TTL (real change)", () => {
+    const old = new Date(now.getTime() - ECHO_TTL_MS - 1);
+    expect(isOwnEcho(hash7, { valueHash: hash7, writtenAt: old }, now)).toBe(false);
+  });
+
+  it("passes through a genuine third-party change (different value)", () => {
+    expect(isOwnEcho(stableHash(9), { valueHash: hash7, writtenAt: t("2026-07-08T11:59:00Z") }, now)).toBe(
+      false,
+    );
+  });
+
+  it("passes through when there is no echo record", () => {
+    expect(isOwnEcho(hash7, null, now)).toBe(false);
   });
 });
 
@@ -196,6 +184,31 @@ describe("parseJsonPreservingBigInts — Shopify IDs above 2^53 must not corrupt
     const parsed = parseJsonPreservingBigInts(raw) as { variants: { id: unknown }[] };
     expect(parsed.variants[0].id).toBe("9007199254740993"); // 2^53 + 1
   });
+
+  it("does not touch digit runs that appear inside string values", () => {
+    // The number-like text is inside a string and must stay a string,
+    // unquoted-and-requoted transforms must not corrupt it.
+    const raw = '{"note":"order 271878346596884015 shipped","id":271878346596884015}';
+    const parsed = parseJsonPreservingBigInts(raw) as { note: string; id: string };
+    expect(parsed.note).toBe("order 271878346596884015 shipped");
+    expect(parsed.id).toBe("271878346596884015");
+  });
+
+  it("preserves negative oversized integers and leaves floats/exponents alone", () => {
+    const raw = '{"a":-271878346596884015,"b":-1.5,"c":1e3,"d":-42}';
+    const parsed = parseJsonPreservingBigInts(raw) as Record<string, unknown>;
+    expect(parsed.a).toBe("-271878346596884015");
+    expect(parsed.b).toBe(-1.5);
+    expect(parsed.c).toBe(1000);
+    expect(parsed.d).toBe(-42);
+  });
+
+  it("handles a string containing an escaped quote before a big int", () => {
+    const raw = '{"note":"say \\"hi\\"","id":271878346596884015}';
+    const parsed = parseJsonPreservingBigInts(raw) as { note: string; id: string };
+    expect(parsed.note).toBe('say "hi"');
+    expect(parsed.id).toBe("271878346596884015");
+  });
 });
 
 describe("diffProductFields — only changed fields are written", () => {
@@ -251,5 +264,29 @@ describe("diffProductFields — only changed fields are written", () => {
       variantMap: new Map([[1n, 2n]]), // variant 3 has no destination
     });
     expect(isEmptyProductDiff(diff)).toBe(true);
+  });
+
+  it("detects a tag change even when tags contain spaces (no delimiter collision)", () => {
+    // ["blue green","red"] and ["blue","green red"] both join to
+    // "blue green red" — a delimiter-join compare would call them equal.
+    const diff = diffProductFields({
+      settings: { syncTitle: false, syncPrice: false, syncTags: true },
+      source: { title: "X", tags: ["blue green", "red"], variantPrices: new Map() },
+      dest: { title: "X", tags: ["blue", "green red"], variantPrices: new Map() },
+      variantMap: new Map(),
+    });
+    expect(diff.tags).toEqual(["blue green", "red"]);
+  });
+});
+
+describe("sameTags — order-insensitive, delimiter-safe", () => {
+  it("is order-insensitive", () => {
+    expect(sameTags(["a", "b"], ["b", "a"])).toBe(true);
+  });
+  it("distinguishes tag sets that share a space-joined form", () => {
+    expect(sameTags(["blue green", "red"], ["blue", "green red"])).toBe(false);
+  });
+  it("distinguishes different-length sets", () => {
+    expect(sameTags(["a"], ["a", "b"])).toBe(false);
   });
 });

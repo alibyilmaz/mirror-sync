@@ -370,6 +370,24 @@ export type BulkOperationStatus = {
   objectCount: string;
 };
 
+// The shop's in-flight bulk QUERY, if any. Shopify allows only one per shop
+// per type; when startBulkExport collides with a still-running op from a
+// prior import attempt, we adopt it instead of failing forever.
+export async function getCurrentBulkQuery(
+  shop: string,
+): Promise<{ id: string; status: string } | null> {
+  const data = await graphql<{
+    currentBulkOperation: { id: string; status: string } | null;
+  }>(
+    shop,
+    `#graphql
+    query mirrorSyncCurrentBulk {
+      currentBulkOperation(type: QUERY) { id status }
+    }`,
+  );
+  return data.currentBulkOperation;
+}
+
 export async function getBulkOperation(shop: string, gid: string): Promise<BulkOperationStatus> {
   const data = await graphql<{
     node: (BulkOperationStatus & { id: string }) | null;
