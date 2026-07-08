@@ -1,0 +1,232 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Shopify session storage (required shape for PrismaSessionStorage)
+// ---------------------------------------------------------------------------
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+
+  @@index([shop])
+}
+
+// ---------------------------------------------------------------------------
+// Shops and pairing
+// ---------------------------------------------------------------------------
+
+model Shop {
+  id            String    @id @default(cuid())
+  domain        String    @unique // my-store.myshopify.com
+  installedAt   DateTime  @default(now())
+  uninstalledAt DateTime?
+  plan          String    @default("free")
+
+  // Last observed GraphQL cost-bucket state; the worker throttles from this.
+  rateAvailable   Float?
+  rateMax         Float?
+  rateRestoreRate Float?
+  rateUpdatedAt   DateTime?
+
+  sourceConnections Connection[]  @relation("SourceShop")
+  destConnections   Connection[]  @relation("DestShop")
+  pairingCodes      PairingCode[]
+}
+
+// One-time code generated on the source store, redeemed on the destination.
+model PairingCode {
+  id        String    @id @default(cuid())
+  code      String    @unique
+  shopId    String
+  shop      Shop      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  usedBy    String? // domain of the shop that redeemed the code
+  createdAt DateTime  @default(now())
+}
+
+model Connection {
+  id           String  @id @default(cuid())
+  sourceShopId String
+  sourceShop   Shop    @relation("SourceShop", fields: [sourceShopId], references: [id])
+  destShopId   String
+  destShop     Shop    @relation("DestShop", fields: [destShopId], references: [id])
+  status       String  @default("importing") // importing | active | paused | disabled
+  pausedReason String?
+
+  // Sync settings. Inventory is the core; the rest are opt-in.
+  syncInventory       Boolean  @default(true)
+  syncTitle           Boolean  @default(false)
+  syncPrice           Boolean  @default(false)
+  syncImages          Boolean  @default(false)
+  syncTags            Boolean  @default(false)
+  metafieldNamespaces String[] @default([])
+
+  // Oversell guard: destination available = source available - buffer (floored at 0).
+  safetyStockBuffer Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  mappings      Mapping[]
+  locationLinks LocationLink[]
+  bulkImports   BulkImport[]
+
+  @@unique([sourceShopId, destShopId])
+}
+
+// Which destination location mirrors which source location.
+model LocationLink {
+  id               String     @id @default(cuid())
+  connectionId     String
+  connection       Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  sourceLocationId BigInt
+  destLocationId   BigInt
+
+  @@unique([connectionId, sourceLocationId])
+}
+
+// ---------------------------------------------------------------------------
+// Variant mapping (the sync unit; billing counts rows here)
+// ---------------------------------------------------------------------------
+
+model Mapping {
+  id           String     @id @default(cuid())
+  connectionId String
+  connection   Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  sku     String?
+  barcode String?
+
+  sourceProductId       BigInt?
+  sourceVariantId       BigInt
+  sourceInventoryItemId BigInt
+  destProductId         BigInt?
+  destVariantId         BigInt
+  destInventoryItemId   BigInt
+
+  matchType String @default("auto_sku") // auto_sku | auto_barcode | manual
+  status    String @default("active") // active | paused | broken
+
+  // Oversell guard state: consecutive failures / repeated drift trip the pause.
+  pauseReason  String?
+  pausedAt     DateTime?
+  failureCount Int       @default(0)
+  driftCount   Int       @default(0)
+  lastSyncedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([connectionId, sourceVariantId])
+  @@index([connectionId, sourceInventoryItemId])
+  @@index([connectionId, status])
+}
+
+// ---------------------------------------------------------------------------
+// Sync engine bookkeeping
+// ---------------------------------------------------------------------------
+
+// Exactly-once webhook processing: primary key is X-Shopify-Webhook-Id.
+model WebhookReceipt {
+  id         String   @id
+  shop       String
+  topic      String
+  receivedAt DateTime @default(now())
+
+  @@index([receivedAt])
+}
+
+// Per-resource version watermark; stale (older) updates are rejected.
+// resourceKey: inventory -> "itemId:locationId", product -> "productId".
+model ResourceVersion {
+  shopDomain   String
+  resourceType String // inventory | product
+  resourceKey  String
+  version      DateTime // Shopify updated_at of the last applied change
+  payloadHash  String?
+  updatedAt    DateTime @updatedAt
+
+  @@id([shopDomain, resourceType, resourceKey])
+}
+
+// Records of writes WE made, so the echo webhook is not synced again (no loops).
+model EchoWrite {
+  id           String   @id @default(cuid())
+  shopDomain   String
+  resourceType String // inventory | product
+  resourceKey  String
+  valueHash    String
+  writtenAt    DateTime @default(now())
+
+  @@index([shopDomain, resourceType, resourceKey, writtenAt])
+}
+
+// Jobs that exhausted retries. Self-serve retry from the dashboard.
+model DeadLetter {
+  id        String    @id @default(cuid())
+  queue     String
+  payload   Json
+  error     String
+  attempts  Int
+  status    String    @default("dead") // dead | retried | discarded
+  failedAt  DateTime  @default(now())
+  retriedAt DateTime?
+
+  @@index([status, failedAt])
+}
+
+// Plain-language history shown on the health screen.
+model AuditLog {
+  id           String   @id @default(cuid())
+  connectionId String?
+  shopDomain   String
+  level        String   @default("info") // info | warn | error
+  kind         String // sync | reconcile | pause | import | system
+  message      String
+  context      Json?
+  createdAt    DateTime @default(now())
+
+  @@index([shopDomain, createdAt])
+  @@index([connectionId, createdAt])
+}
+
+// Bulk Operation state for the initial import (one per side of a connection).
+model BulkImport {
+  id              String     @id @default(cuid())
+  connectionId    String
+  connection      Connection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  side            String // source | dest
+  bulkOperationId String?
+  status          String     @default("pending") // pending | running | completed | failed
+  url             String?
+  error           String?
+  startedAt       DateTime   @default(now())
+  completedAt     DateTime?
+
+  @@index([connectionId, side])
+}

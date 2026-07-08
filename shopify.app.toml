@@ -1,0 +1,40 @@
+# This file stores configurations for your Shopify app.
+# Run `npm run config:link` to connect it to an app in the Dev Dashboard.
+client_id = ""
+name = "MirrorSync"
+
+[access_scopes]
+scopes = "read_inventory,write_inventory,read_products,write_products,read_locations"
+
+[webhooks]
+api_version = "2025-10"
+
+  # Sync topics: verified, enqueued to pgmq and answered fast in one route.
+  # Handled by: /app/routes/webhooks.sync.tsx
+  [[webhooks.subscriptions]]
+  topics = ["inventory_levels/update", "products/update", "products/delete"]
+  uri = "/webhooks/sync"
+
+  # Handled by: /app/routes/webhooks.app.uninstalled.tsx
+  [[webhooks.subscriptions]]
+  topics = ["app/uninstalled"]
+  uri = "/webhooks/app/uninstalled"
+
+  # Handled by: /app/routes/webhooks.app.scopes_update.tsx
+  [[webhooks.subscriptions]]
+  topics = ["app/scopes_update"]
+  uri = "/webhooks/app/scopes_update"
+
+  # Mandatory compliance topics for public apps.
+  # Handled by: /app/routes/webhooks.compliance.tsx
+  [[webhooks.subscriptions]]
+  compliance_topics = ["customers/data_request"]
+  uri = "/webhooks/compliance"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = ["customers/redact"]
+  uri = "/webhooks/compliance"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = ["shop/redact"]
+  uri = "/webhooks/compliance"
