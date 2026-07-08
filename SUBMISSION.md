@@ -22,6 +22,10 @@ Status as of the latest deploy. Items marked ✅ are done in code/config;
 - ✅ **HMAC-verified webhooks, fast 200, async processing** — no request-time
   API work; queue consumer does the rest.
 
+> Ready-to-paste listing copy (name, subtitle, intro, details, features,
+> search terms, screenshot/video scenarios, pricing text) is in
+> **[LISTING.md](LISTING.md)**.
+
 ## 2. App listing (Partner/Dev Dashboard → your app → Distribution → Manage listing)
 
 - ⬜ **App name**: "MirrorSync" (confirm it's available/unique in the store).
