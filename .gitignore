@@ -17,7 +17,9 @@ database.sqlite
 .env.*
 !.env.example
 
-package-lock.json
+# Lockfile is committed on purpose (reproducible builds; npm ci in CI and
+# Docker depend on it). The template ignored it to stay package-manager
+# agnostic — this app is npm-only.
 yarn.lock
 pnpm-lock.yaml
 
