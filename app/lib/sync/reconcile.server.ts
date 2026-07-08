@@ -2,8 +2,8 @@ import prisma from "../../db.server";
 import type { ReconcileConnectionJob } from "../jobs";
 import { inventoryKey, stableHash, toGid } from "../util";
 import { shouldPauseAfterDrift, shouldPauseAfterFailure, targetQuantity } from "./decisions";
-import { RateLimitedError } from "./admin.server";
 import {
+  RateLimitedError,
   activateInventory,
   getInventoryAvailableBatch,
   setInventoryAvailable,

@@ -264,8 +264,8 @@ export default function Mappings() {
       </s-section>
 
       <s-banner tone="info" heading="Missing a product?">
-        If some products on the source store didn't match, fix their SKU or
-        barcode on either store, then use "Restart import" on the Health page.
+        If some products on the source store didn&apos;t match, fix their SKU or
+        barcode on either store, then use &quot;Restart import&quot; on the Health page.
         Restarting the import keeps all of your manual mappings.
       </s-banner>
 
@@ -297,9 +297,9 @@ export default function Mappings() {
       <s-section heading="Add a manual mapping">
         <s-paragraph>
           Link a source variant to a destination variant by their numeric IDs.
-          To find a variant's ID, open the product in the Shopify admin, click
+          To find a variant&apos;s ID, open the product in the Shopify admin, click
           the variant, and copy the number at the end of the browser URL. The
-          inventory item ID is shown in the URL when you view that variant's
+          inventory item ID is shown in the URL when you view that variant&apos;s
           inventory history.
         </s-paragraph>
         <manual.Form method="post">

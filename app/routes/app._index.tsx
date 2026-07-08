@@ -228,7 +228,7 @@ export default function Index() {
         </s-paragraph>
         {skuLimit !== null && syncedSkus >= skuLimit && (
           <s-banner tone="warning">
-            You've reached your plan's SKU limit. New products won't sync
+            You&apos;ve reached your plan&apos;s SKU limit. New products won&apos;t sync
             until you upgrade.
           </s-banner>
         )}
