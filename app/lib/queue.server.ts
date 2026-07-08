@@ -57,12 +57,14 @@ export async function discard(queue: QueueName, msgId: bigint): Promise<void> {
 
 // Transient failure or rate-limit wait: push visibility into the future so
 // the message is retried later. Backoff grows with read_ct.
+// Project a plain column: set_vt returns SETOF pgmq.message_record, and
+// Prisma can't deserialize the bare composite type.
 export async function delay(
   queue: QueueName,
   msgId: bigint,
   seconds: number,
 ): Promise<void> {
-  await prisma.$queryRaw`SELECT pgmq.set_vt(${queue}::text, ${msgId}::bigint, ${seconds}::integer)`;
+  await prisma.$queryRaw`SELECT msg_id FROM pgmq.set_vt(${queue}::text, ${msgId}::bigint, ${seconds}::integer)`;
 }
 
 export function backoffSeconds(attempt: number): number {

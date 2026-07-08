@@ -22,19 +22,24 @@ async function main() {
     update: { plan: "free", uninstalledAt: null },
   });
 
+  // "paused", not "active": these shops are fake (no Shopify session), so
+  // an active connection would make the hourly pg_cron reconcile enqueue
+  // jobs the worker can only fail on.
+  const DEMO_PAUSE = "Demo data — no real stores behind this connection";
   const connection = await prisma.connection.upsert({
     where: { sourceShopId_destShopId: { sourceShopId: source.id, destShopId: dest.id } },
     create: {
       id: "conn_demo",
       sourceShopId: source.id,
       destShopId: dest.id,
-      status: "active",
+      status: "paused",
+      pausedReason: DEMO_PAUSE,
       syncInventory: true,
       syncTitle: true,
       syncPrice: true,
       safetyStockBuffer: 2,
     },
-    update: { status: "active", safetyStockBuffer: 2 },
+    update: { status: "paused", pausedReason: DEMO_PAUSE, safetyStockBuffer: 2 },
   });
 
   await prisma.locationLink.upsert({
@@ -113,7 +118,7 @@ async function main() {
 
   console.log("Seed complete:");
   console.log(`  shops:       ${SOURCE} (growth), ${DEST} (free)`);
-  console.log(`  connection:  ${connection.id} active, buffer 2`);
+  console.log(`  connection:  ${connection.id} ${connection.status}, buffer 2`);
   console.log(`  mappings:    ${mappings.length} (2 active, 2 paused, 1 broken)`);
   console.log(`  audit logs:  ${logs.length}`);
   console.log(`  dead letter: 1`);
