@@ -5,7 +5,7 @@
     "build": "react-router build && npm run build:worker",
     "build:worker": "esbuild app/worker.entry.ts --bundle --platform=node --format=esm --outfile=build/worker.mjs --packages=external",
     "dev": "shopify app dev",
-    "dev:worker": "tsx watch app/worker.entry.ts",
+    "dev:worker": "node --env-file=.env --watch --import tsx app/worker.entry.ts",
     "serve": "node --env-file=.env server.mjs",
     "seed": "prisma db seed",
     "test": "vitest run",
