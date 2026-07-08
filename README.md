@@ -63,6 +63,10 @@ npm run typecheck
 The dev server does not run the worker — run both commands side by side.
 In production `server.mjs` runs both in one process.
 
+Order matters on Windows: start `npm run dev` first and `npm run dev:worker`
+second. Dev's pre-step runs `prisma generate`, which fails with EPERM if a
+running worker holds the query-engine DLL open.
+
 ### Seed demo data
 
 ```bash
