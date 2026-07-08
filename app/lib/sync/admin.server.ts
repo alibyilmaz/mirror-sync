@@ -1,5 +1,13 @@
 import prisma from "../../db.server";
 import { unauthenticated } from "../../shopify.server";
+import { stableHash } from "../util";
+
+// Admin API 2026-07 requires the @idempotent directive on inventory
+// mutations. A content-derived key means a retry of the identical write is
+// deduplicated server-side (harmless if it also no-ops on our side).
+function idempotencyKey(parts: Record<string, unknown>): string {
+  return stableHash(parts);
+}
 
 // Admin API access for background jobs (no request context): offline
 // session token via unauthenticated.admin(shop), plus a per-shop rate
@@ -170,9 +178,11 @@ export async function setInventoryAvailable(
     };
   }>(
     shop,
+    // @idempotent (required in 2026-07) + changeFromQuantity, which replaced
+    // compareQuantity as the optimistic-concurrency guard.
     `#graphql
-    mutation mirrorSyncSetAvailable($input: InventorySetQuantitiesInput!) {
-      inventorySetQuantities(input: $input) {
+    mutation mirrorSyncSetAvailable($input: InventorySetQuantitiesInput!, $key: String!) {
+      inventorySetQuantities(input: $input) @idempotent(key: $key) {
         userErrors { field message code }
       }
     }`,
@@ -182,14 +192,27 @@ export async function setInventoryAvailable(
         reason: "correction",
         referenceDocumentUri: referenceUri,
         quantities: [
-          { inventoryItemId: inventoryItemGid, locationId: locationGid, quantity, compareQuantity },
+          {
+            inventoryItemId: inventoryItemGid,
+            locationId: locationGid,
+            quantity,
+            changeFromQuantity: compareQuantity,
+          },
         ],
       },
+      key: idempotencyKey({
+        op: "set",
+        referenceUri,
+        inventoryItemGid,
+        locationGid,
+        quantity,
+        changeFromQuantity: compareQuantity,
+      }),
     },
   );
   const errors = data.inventorySetQuantities.userErrors;
   if (errors.length > 0) {
-    if (errors.some((e) => e.code === "COMPARE_QUANTITY_STALE")) {
+    if (errors.some((e) => e.code === "CHANGE_FROM_QUANTITY_STALE")) {
       throw new StaleWriteError();
     }
     throw new ShopApiError(
@@ -300,13 +323,19 @@ export async function activateInventory(
     inventoryActivate: { userErrors: { message: string }[] };
   }>(
     shop,
+    // @idempotent is required on inventoryActivate in 2026-07.
     `#graphql
-    mutation mirrorSyncActivate($inventoryItemId: ID!, $locationId: ID!, $available: Int) {
-      inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId, available: $available) {
+    mutation mirrorSyncActivate($inventoryItemId: ID!, $locationId: ID!, $available: Int, $key: String!) {
+      inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId, available: $available) @idempotent(key: $key) {
         userErrors { field message }
       }
     }`,
-    { inventoryItemId: inventoryItemGid, locationId: locationGid, available },
+    {
+      inventoryItemId: inventoryItemGid,
+      locationId: locationGid,
+      available,
+      key: idempotencyKey({ op: "activate", inventoryItemGid, locationGid, available }),
+    },
   );
   if (data.inventoryActivate.userErrors.length > 0) {
     throw new ShopApiError(
