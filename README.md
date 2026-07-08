@@ -107,14 +107,30 @@ drain (`SELECT queue_length FROM pgmq.metrics('sync_jobs')`).
   `variants(first: 250)`, so products with 250+ variants can miss a price
   diff; `products/update` webhook payloads cap variants at 100.
 
-## Deploy (Fly.io/Railway)
+## Deploy (Railway / Fly.io)
 
-The Dockerfile builds the app and the worker bundle. The container runs
-`npm run docker-start` → migrations, then `node server.mjs` (web + worker).
-Set the same env vars as `.env.example`. Scale to exactly **one** machine
-that never sleeps: the worker loop is single-threaded on purpose (no races
-on watermarks or rate budgets), and one instance is plenty for the write
-volumes involved.
+The Dockerfile builds the app + worker bundle and generates the Prisma
+client; `docker-entrypoint.sh` runs migrations, then `exec node server.mjs`
+as PID 1 so SIGTERM reaches the graceful-shutdown handler. Set the same env
+vars as `.env.example`. Scale to exactly **one** machine that never sleeps:
+the worker loop is single-threaded on purpose (no races on watermarks or
+rate budgets), and one instance is plenty for the write volumes involved.
+Config is committed for both hosts: `railway.json` (single replica) and
+`fly.toml` (region `bom`, `--ha=false`).
+
+After deploying, point the Shopify app at the host and release:
+`application_url` in `shopify.app.toml` → the deploy URL, then
+`shopify app deploy`. Note: `shopify app dev` re-points URLs to a tunnel
+while it runs, so stop it before relying on production webhooks and
+re-`deploy` if it ran.
+
+**Webhooks on `shopify app dev`-preview installs**: stores installed via
+the CLI preview register their declarative webhooks against the dev tunnel.
+Real merchants installing the deployed app get them pointed at the host
+automatically, but a dev-preview test store keeps the stale tunnel target —
+re-register its topics against the host once (see `webhookSubscriptionCreate`
+for `INVENTORY_LEVELS_UPDATE` / `PRODUCTS_UPDATE` / `PRODUCTS_DELETE` →
+`/webhooks/sync`).
 
 ## How syncing works (short version)
 
