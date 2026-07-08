@@ -5,6 +5,13 @@ name = "mirror-sync"
 application_url = "https://example.com"
 embedded = true
 
+[build]
+# Let `shopify app dev` point the app at the tunnel/preview URL each run
+# instead of the placeholder application_url above (which is why the
+# embedded app was loading "Example Domain").
+automatically_update_urls_on_dev = true
+dev_store_url = "mirror-sync.myshopify.com"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_inventory,write_inventory,read_products,write_products,read_locations"
