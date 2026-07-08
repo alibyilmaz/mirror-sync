@@ -22,16 +22,26 @@ const POLL_INTERVAL_MS = 2000;
 const VISIBILITY_TIMEOUT_S = 120;
 
 let running = false;
+let loopPromise: Promise<void> | null = null;
+let wakeSleep: (() => void) | null = null;
 
 export function startWorker(): void {
   if (running) return;
   running = true;
   console.log("[worker] queue consumer started");
-  void loop();
+  loopPromise = loop();
 }
 
-export function stopWorker(): void {
+// Graceful stop: signal the loop to finish its current batch, wake it if
+// it's idle-sleeping, and resolve once it has exited so the caller can
+// drain before the process dies (a message cut off mid-flight would
+// otherwise reappear only after the 120s visibility timeout).
+export async function stopWorker(): Promise<void> {
+  if (!running) return;
   running = false;
+  wakeSleep?.();
+  await loopPromise;
+  loopPromise = null;
 }
 
 async function loop(): Promise<void> {
@@ -108,6 +118,18 @@ async function handle(queue: QueueName, msg: QueueMessage): Promise<void> {
   }
 }
 
+// Interruptible: stopWorker() cuts the idle wait short so shutdown is fast
+// when the queue is empty.
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      wakeSleep = null;
+      resolve();
+    }, ms);
+    wakeSleep = () => {
+      clearTimeout(timer);
+      wakeSleep = null;
+      resolve();
+    };
+  });
 }

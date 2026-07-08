@@ -32,6 +32,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           db.webhookReceipt.deleteMany({ where: { shop } }),
           db.resourceVersion.deleteMany({ where: { shopDomain: shop } }),
           db.echoWrite.deleteMany({ where: { shopDomain: shop } }),
+          // Dead-letter payloads carry this shop's webhook data, so they
+          // must be purged too.
+          db.deadLetter.deleteMany({ where: { shopDomain: shop } }),
           db.auditLog.deleteMany({ where: { shopDomain: shop } }),
         ]);
       }

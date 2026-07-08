@@ -462,27 +462,18 @@ async function syncProductFields(params: {
   }
 
   if (changes.length > 0) {
-    await prisma.$transaction([
-      prisma.echoWrite.create({
-        data: {
-          shopDomain: destDomain,
-          resourceType: "product",
-          resourceKey: destProductGid.split("/").pop()!,
-          valueHash: stableHash({
-            title: source.title,
-            tags: [...source.tags].sort(),
-          }),
-        },
-      }),
-      prisma.auditLog.create({
-        data: {
-          connectionId,
-          shopDomain: destDomain,
-          kind: "sync",
-          message: `Product "${source.title}" updated at ${destDomain}: ${changes.join(", ")}.`,
-        },
-      }),
-    ]);
+    // No EchoWrite here: unlike inventory, handleProductUpdate has no
+    // inbound own-echo check, so a product echo row would never be read.
+    // Loop safety for product fields rests on the acyclic pairing graph
+    // plus diffProductFields returning an empty diff for equal fields.
+    await prisma.auditLog.create({
+      data: {
+        connectionId,
+        shopDomain: destDomain,
+        kind: "sync",
+        message: `Product "${source.title}" updated at ${destDomain}: ${changes.join(", ")}.`,
+      },
+    });
   }
 }
 

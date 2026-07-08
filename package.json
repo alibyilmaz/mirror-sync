@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "build": "react-router build && npm run build:worker",
-    "build:worker": "esbuild app/worker.entry.ts --bundle --platform=node --format=esm --outfile=build/worker.mjs --packages=external",
+    "build:worker": "esbuild app/worker.prod.ts --bundle --platform=node --format=esm --outfile=build/worker.mjs --packages=external",
     "dev": "shopify app dev",
     "dev:worker": "node --env-file=.env --watch --import tsx app/worker.entry.ts",
     "serve": "node --env-file=.env server.mjs",
