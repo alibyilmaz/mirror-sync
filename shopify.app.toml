@@ -2,7 +2,7 @@
 
 client_id = "6fd2209d338b44cf48e4bba03958c485"
 name = "mirror-sync"
-application_url = "https://example.com"
+application_url = "https://mirror-sync-production.up.railway.app"
 embedded = true
 
 [build]
@@ -42,4 +42,7 @@ api_version = "2025-10"
   compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
 
 [auth]
-redirect_urls = [ ]
+redirect_urls = [
+  "https://mirror-sync-production.up.railway.app/auth/callback",
+  "https://mirror-sync-production.up.railway.app/auth/shopify/callback",
+]
