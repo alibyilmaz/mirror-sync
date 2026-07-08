@@ -293,6 +293,13 @@ async function stepMatch(conn: Conn): Promise<void> {
     return;
   }
 
+  // A re-import refreshes mapping targets but deliberately does NOT revive
+  // SKUs that were auto-paused (write failures / drift) — that needs the
+  // merchant's explicit "Resync now". Say so, or the pause looks like a bug.
+  const stillPaused = await prisma.mapping.count({
+    where: { connectionId: conn.id, status: "paused" },
+  });
+
   await prisma.$transaction([
     prisma.connection.update({ where: { id: conn.id }, data: { status: "active" } }),
     prisma.auditLog.create({
@@ -300,10 +307,12 @@ async function stepMatch(conn: Conn): Promise<void> {
         connectionId: conn.id,
         shopDomain: conn.sourceShop.domain,
         kind: "import",
+        level: stillPaused > 0 ? "warn" : "info",
         message:
           `Initial matching finished: ${matchedSku} SKUs matched by SKU, ${matchedBarcode} by barcode` +
           `${ambiguous > 0 ? `, ${ambiguous} skipped because the same SKU/barcode exists on several destination products (map them manually)` : ""}` +
-          `${unmatched > 0 ? `, ${unmatched} had no match at ${conn.destShop.domain}` : ""}. Now pushing initial inventory levels.`,
+          `${unmatched > 0 ? `, ${unmatched} had no match at ${conn.destShop.domain}` : ""}. Now pushing initial inventory levels.` +
+          `${stillPaused > 0 ? ` Note: ${stillPaused} SKU${stillPaused === 1 ? " is" : "s are"} still paused and won't sync — use "Resync now" on the Health page to resume ${stillPaused === 1 ? "it" : "them"}.` : ""}`,
       },
     }),
   ]);
