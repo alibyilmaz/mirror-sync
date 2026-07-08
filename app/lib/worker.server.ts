@@ -6,6 +6,7 @@ import {
   deadLetter,
   delay,
   readBatch,
+  resolveJobShop,
   type QueueMessage,
 } from "./queue.server";
 import { processJob, RateLimitedError } from "./sync/process.server";
@@ -74,7 +75,7 @@ async function handle(queue: QueueName, msg: QueueMessage): Promise<void> {
       await deadLetter(queue, msg, error);
       await prisma.auditLog.create({
         data: {
-          shopDomain: "shop" in msg.job ? (msg.job as { shop: string }).shop : "system",
+          shopDomain: await resolveJobShop(msg.job),
           level: "error",
           kind: "system",
           message: `A sync job failed ${msg.readCt} times and was moved to the dead-letter queue. You can retry it from the Health page.`,

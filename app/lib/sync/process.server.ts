@@ -65,9 +65,11 @@ async function processWebhook(job: WebhookJob): Promise<void> {
 // inventory_levels/update — the core path
 // ---------------------------------------------------------------------------
 
+// IDs can arrive as strings: ingest keeps integers above 2^53 as strings
+// to avoid precision loss (BigInt() accepts both).
 type InventoryLevelPayload = {
-  inventory_item_id: number;
-  location_id: number;
+  inventory_item_id: number | string;
+  location_id: number | string;
   available: number | null;
   updated_at: string;
 };
@@ -269,11 +271,11 @@ async function recordWriteFailure(
 // ---------------------------------------------------------------------------
 
 type ProductPayload = {
-  id: number;
+  id: number | string;
   title: string;
   tags: string; // REST-shaped: comma-separated
   updated_at: string;
-  variants: { id: number; price: string; sku: string | null }[];
+  variants: { id: number | string; price: string; sku: string | null }[];
 };
 
 async function handleProductUpdate(job: WebhookJob): Promise<void> {
@@ -464,7 +466,7 @@ async function syncProductFields(params: {
 // ---------------------------------------------------------------------------
 
 async function handleProductDelete(job: WebhookJob): Promise<void> {
-  const p = job.payload as { id: number };
+  const p = job.payload as { id: number | string };
   const mappings = await prisma.mapping.findMany({
     where: {
       sourceProductId: BigInt(p.id),

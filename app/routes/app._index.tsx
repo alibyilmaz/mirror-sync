@@ -3,6 +3,7 @@ import { useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { refreshPlan, skuLimitFor, upgradeUrl, PLANS } from "../lib/plans.server";
 
 const STATUS_TONE: Record<string, "info" | "success" | "warning" | "neutral"> =
   {
@@ -75,7 +76,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             },
           })
         : Promise.resolve(0),
-      db.deadLetter.count({ where: { status: "dead" } }),
+      db.deadLetter.count({
+        where: {
+          status: "dead",
+          // Only this store's failures (connection jobs belong to the
+          // source shop; include both sides of our connections).
+          shopDomain: {
+            in: [
+              session.shop,
+              ...asSource.map((c) => c.destShop.domain),
+              ...asDest.map((c) => c.sourceShop.domain),
+            ],
+          },
+        },
+      }),
       db.auditLog.findMany({
         where: {
           OR: [
@@ -88,8 +102,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }),
     ]);
 
+  // Refresh the managed-pricing plan while the merchant is looking at us;
+  // falls back to the cached value if the API call fails.
+  const plan = await refreshPlan(session.shop);
+
+  const limit = skuLimitFor(plan);
+
   return {
-    plan: shop?.plan ?? "free",
+    plan,
+    planLabel: PLANS[plan]?.label ?? plan,
+    // Infinity doesn't survive JSON serialization; null = unlimited.
+    skuLimit: Number.isFinite(limit) ? limit : null,
+    manageplanUrl: upgradeUrl(session.shop),
     connections,
     syncedSkus,
     pausedSkus,
@@ -104,8 +128,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function Index() {
-  const { plan, connections, syncedSkus, pausedSkus, failedJobs, recentActivity } =
-    useLoaderData<typeof loader>();
+  const {
+    planLabel,
+    skuLimit,
+    manageplanUrl,
+    connections,
+    syncedSkus,
+    pausedSkus,
+    failedJobs,
+    recentActivity,
+  } = useLoaderData<typeof loader>();
 
   const needsAttention = pausedSkus > 0 || failedJobs > 0;
 
@@ -189,12 +221,20 @@ export default function Index() {
       </s-section>
 
       <s-section slot="aside" heading="Plan">
-        <s-paragraph>
-          Current plan: {plan.charAt(0).toUpperCase() + plan.slice(1)}
-        </s-paragraph>
+        <s-paragraph>Current plan: {planLabel}</s-paragraph>
         <s-paragraph>
           Synced SKUs: {String(syncedSkus)}
+          {skuLimit !== null ? ` of ${skuLimit}` : " (unlimited)"}
         </s-paragraph>
+        {skuLimit !== null && syncedSkus >= skuLimit && (
+          <s-banner tone="warning">
+            You've reached your plan's SKU limit. New products won't sync
+            until you upgrade.
+          </s-banner>
+        )}
+        <s-link href={manageplanUrl} target="_blank">
+          Manage plan
+        </s-link>
       </s-section>
     </s-page>
   );

@@ -145,6 +145,7 @@ CREATE TABLE "EchoWrite" (
 CREATE TABLE "DeadLetter" (
     "id" TEXT NOT NULL,
     "queue" TEXT NOT NULL,
+    "shopDomain" TEXT NOT NULL DEFAULT 'system',
     "payload" JSONB NOT NULL,
     "error" TEXT NOT NULL,
     "attempts" INTEGER NOT NULL,
@@ -215,7 +216,7 @@ CREATE INDEX "WebhookReceipt_receivedAt_idx" ON "WebhookReceipt"("receivedAt");
 CREATE INDEX "EchoWrite_shopDomain_resourceType_resourceKey_writtenAt_idx" ON "EchoWrite"("shopDomain", "resourceType", "resourceKey", "writtenAt");
 
 -- CreateIndex
-CREATE INDEX "DeadLetter_status_failedAt_idx" ON "DeadLetter"("status", "failedAt");
+CREATE INDEX "DeadLetter_shopDomain_status_failedAt_idx" ON "DeadLetter"("shopDomain", "status", "failedAt");
 
 -- CreateIndex
 CREATE INDEX "AuditLog_shopDomain_createdAt_idx" ON "AuditLog"("shopDomain", "createdAt");

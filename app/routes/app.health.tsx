@@ -94,8 +94,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     take: 50,
   });
 
+  // Only this store's failures — connection-scoped jobs are attributed to
+  // the source shop, so include domains from both sides of our connections.
+  const visibleDomains = [
+    session.shop,
+    ...connections.map((c) => c.otherShop),
+  ];
   const deadLetters = await db.deadLetter.findMany({
-    where: { status: "dead" },
+    where: { status: "dead", shopDomain: { in: visibleDomains } },
     select: { id: true, queue: true, error: true, attempts: true, failedAt: true },
     orderBy: { failedAt: "desc" },
     take: 50,
@@ -180,6 +186,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const deadLetterRow = await db.deadLetter.findUnique({
       where: { id: deadLetterId },
     });
+    // Ownership: the job's shop must be this store or a store it is
+    // connected to.
+    if (deadLetterRow) {
+      const owned = await db.connection.findFirst({
+        where: {
+          OR: [
+            { sourceShop: { domain: session.shop } },
+            { destShop: { domain: session.shop } },
+          ],
+          AND: {
+            OR: [
+              { sourceShop: { domain: deadLetterRow.shopDomain } },
+              { destShop: { domain: deadLetterRow.shopDomain } },
+            ],
+          },
+        },
+      });
+      if (!owned && deadLetterRow.shopDomain !== session.shop) {
+        return { error: "That job was not found." };
+      }
+    }
     if (!deadLetterRow) return { error: "That job was not found." };
     await enqueue(QUEUES.sync, { type: "retry_dead_letter", deadLetterId });
     return { message: "Retry queued." };

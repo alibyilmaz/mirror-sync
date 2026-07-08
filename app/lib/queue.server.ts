@@ -87,10 +87,32 @@ export async function deadLetter(
   await prisma.deadLetter.create({
     data: {
       queue,
+      shopDomain: await resolveJobShop(msg.job),
       payload: msg.job as unknown as Prisma.InputJsonValue,
       error: error.slice(0, 4000),
       attempts: msg.readCt,
     },
   });
   await ack(queue, msg.msgId);
+}
+
+// Which shop a job belongs to, for scoping dead letters and audit entries.
+// Connection-scoped jobs are attributed to the source shop.
+export async function resolveJobShop(job: Job): Promise<string> {
+  if (job.type === "webhook") return job.shop;
+  if (job.type === "reconcile_connection" || job.type === "initial_import") {
+    const conn = await prisma.connection.findUnique({
+      where: { id: job.connectionId },
+      select: { sourceShop: { select: { domain: true } } },
+    });
+    return conn?.sourceShop.domain ?? "system";
+  }
+  if (job.type === "retry_dead_letter") {
+    const dl = await prisma.deadLetter.findUnique({
+      where: { id: job.deadLetterId },
+      select: { shopDomain: true },
+    });
+    return dl?.shopDomain ?? "system";
+  }
+  return "system";
 }

@@ -12,7 +12,7 @@ import {
   MAX_DRIFT_REPAIRS,
 } from "./decisions";
 import { wouldCreateCycle } from "../graph";
-import { stableHash } from "../util";
+import { parseJsonPreservingBigInts, stableHash } from "../util";
 
 const t = (iso: string) => new Date(iso);
 
@@ -164,6 +164,37 @@ describe("wouldCreateCycle — pairing keeps the graph acyclic", () => {
     ];
     expect(wouldCreateCycle(edges, "b", "c")).toBe(false); // a->b->c chain stays acyclic
     expect(wouldCreateCycle(edges, "b", "d")).toBe(false);
+  });
+});
+
+describe("parseJsonPreservingBigInts — Shopify IDs above 2^53 must not corrupt", () => {
+  it("keeps oversized integer IDs as exact strings", () => {
+    // Real ID from Shopify's webhook documentation examples.
+    const raw = '{"inventory_item_id":271878346596884015,"available":10}';
+    const parsed = parseJsonPreservingBigInts(raw) as Record<string, unknown>;
+    expect(parsed.inventory_item_id).toBe("271878346596884015");
+    expect(BigInt(parsed.inventory_item_id as string)).toBe(271878346596884015n);
+    expect(parsed.available).toBe(10); // small numbers stay numbers
+  });
+
+  it("leaves safe integers, floats and non-numeric fields untouched", () => {
+    const raw = '{"id":123,"price":"10.00","weight":1.25,"nested":{"location_id":24826418}}';
+    const parsed = parseJsonPreservingBigInts(raw) as {
+      id: number;
+      price: string;
+      weight: number;
+      nested: { location_id: number };
+    };
+    expect(parsed.id).toBe(123);
+    expect(parsed.price).toBe("10.00");
+    expect(parsed.weight).toBe(1.25);
+    expect(parsed.nested.location_id).toBe(24826418);
+  });
+
+  it("handles oversized IDs inside arrays (product variants)", () => {
+    const raw = '{"variants":[{"id":9007199254740993}]}';
+    const parsed = parseJsonPreservingBigInts(raw) as { variants: { id: unknown }[] };
+    expect(parsed.variants[0].id).toBe("9007199254740993"); // 2^53 + 1
   });
 });
 

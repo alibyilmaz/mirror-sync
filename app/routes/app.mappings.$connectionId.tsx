@@ -3,6 +3,7 @@ import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { checkPlanLimit } from "../lib/plans.server";
 
 async function loadConnectionForShop(connectionId: string | undefined, shopDomain: string) {
   if (!connectionId) throw new Response("Not found", { status: 404 });
@@ -116,6 +117,22 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return { error: "Every ID field is required and must contain only digits." };
     }
     const sku = String(form.get("sku") ?? "").trim() || null;
+
+    // Plan limit applies wherever mappings are born (import + here).
+    const existing = await db.mapping.findUnique({
+      where: {
+        connectionId_sourceVariantId: { connectionId: connection.id, sourceVariantId },
+      },
+      select: { id: true },
+    });
+    if (!existing) {
+      const plan = await checkPlanLimit(connection.sourceShop.domain);
+      if (plan.used >= plan.limit) {
+        return {
+          error: `The ${plan.plan} plan covers ${plan.limit} synced SKUs and ${plan.used} are in use. Upgrade the plan to add more.`,
+        };
+      }
+    }
 
     await db.mapping.upsert({
       where: {

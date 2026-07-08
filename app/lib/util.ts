@@ -15,6 +15,25 @@ function canonicalJson(value: unknown): string {
   return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`).join(",")}}`;
 }
 
+// Shopify's own webhook examples use IDs above Number.MAX_SAFE_INTEGER
+// (e.g. inventory_item_id 271878346596884015), so a plain JSON.parse would
+// silently corrupt them. Integers that don't fit a double are kept as
+// strings (BigInt() accepts both shapes downstream).
+export function parseJsonPreservingBigInts(text: string): unknown {
+  return JSON.parse(text, function (this: unknown, _key, value, context?: { source?: string }) {
+    if (
+      typeof value === "number" &&
+      Number.isInteger(value) &&
+      !Number.isSafeInteger(value) &&
+      context?.source &&
+      /^-?\d+$/.test(context.source)
+    ) {
+      return context.source;
+    }
+    return value;
+  } as (key: string, value: unknown) => unknown);
+}
+
 // GraphQL GIDs <-> numeric IDs (webhook payloads are REST-shaped and numeric).
 export function toGid(type: string, id: bigint | number | string): string {
   return `gid://shopify/${type}/${id}`;

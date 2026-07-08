@@ -3,12 +3,18 @@ import { Prisma } from "@prisma/client";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
 import { QUEUES } from "../lib/jobs";
+import { parseJsonPreservingBigInts } from "../lib/util";
 
 // Single ingest endpoint for the three sync topics. Contract: verify HMAC
 // (authenticate.webhook), dedupe by webhook id, enqueue, answer 200 fast.
 // All real work happens in the queue consumer.
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, topic, payload, webhookId } = await authenticate.webhook(request);
+  // Grab the raw body before authenticate.webhook consumes the stream: its
+  // own JSON.parse would round IDs above 2^53 (Shopify docs use such IDs
+  // in examples on purpose). We re-parse keeping oversized ints as strings.
+  const rawBody = await request.clone().text();
+  const { shop, topic, webhookId } = await authenticate.webhook(request);
+  const payload = parseJsonPreservingBigInts(rawBody);
 
   // Ignore events from shops that aren't a source of any live connection.
   // (Destination-side echoes of our own writes land here and die quietly.)

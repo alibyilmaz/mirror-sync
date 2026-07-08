@@ -187,17 +187,19 @@ model EchoWrite {
 }
 
 // Jobs that exhausted retries. Self-serve retry from the dashboard.
+// shopDomain scopes visibility: merchants only ever see their own failures.
 model DeadLetter {
-  id        String    @id @default(cuid())
-  queue     String
-  payload   Json
-  error     String
-  attempts  Int
-  status    String    @default("dead") // dead | retried | discarded
-  failedAt  DateTime  @default(now())
-  retriedAt DateTime?
+  id         String    @id @default(cuid())
+  queue      String
+  shopDomain String    @default("system")
+  payload    Json
+  error      String
+  attempts   Int
+  status     String    @default("dead") // dead | retried | discarded
+  failedAt   DateTime  @default(now())
+  retriedAt  DateTime?
 
-  @@index([status, failedAt])
+  @@index([shopDomain, status, failedAt])
 }
 
 // Plain-language history shown on the health screen.
