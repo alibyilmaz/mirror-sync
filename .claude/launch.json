@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mirror-sync-server",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--env-file=.env", "server.mjs"],
+      "port": 3000
+    },
+    {
+      "name": "mirror-sync-worker",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "watch", "app/worker.entry.ts"],
+      "port": 0
+    }
+  ]
+}

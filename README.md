@@ -63,6 +63,32 @@ npm run typecheck
 The dev server does not run the worker — run both commands side by side.
 In production `server.mjs` runs both in one process.
 
+### Seed demo data
+
+```bash
+npm run seed         # idempotent: 2 shops, 1 connection, 5 SKUs, audit log, 1 DLQ row
+```
+
+Populates enough for the dashboard queries and the worker to have something
+to show. It seeds no `Session` rows, so the embedded UI still needs a real
+Shopify install to authenticate.
+
+### Run it locally without Shopify
+
+`npm run dev` needs a linked Shopify app and an interactive Partner login.
+To exercise the DB + queue + worker layer without that, run the built server
+directly:
+
+```bash
+npm run build        # react-router build + esbuild worker bundle
+npm run serve        # node --env-file=.env server.mjs  (web + worker, port 3000)
+```
+
+The landing page serves at http://localhost:3000; `/app` returns an auth
+challenge until a real install provides a session token. The worker connects
+to Supabase and polls pgmq immediately — enqueue a job and watch the queue
+drain (`SELECT queue_length FROM pgmq.metrics('sync_jobs')`).
+
 ## Deploy (Fly.io/Railway)
 
 The Dockerfile builds the app and the worker bundle. The container runs

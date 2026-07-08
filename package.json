@@ -6,6 +6,8 @@
     "build:worker": "esbuild app/worker.entry.ts --bundle --platform=node --format=esm --outfile=build/worker.mjs --packages=external",
     "dev": "shopify app dev",
     "dev:worker": "tsx watch app/worker.entry.ts",
+    "serve": "node --env-file=.env server.mjs",
+    "seed": "prisma db seed",
     "test": "vitest run",
     "config:link": "shopify app config link",
     "generate": "shopify app generate",
@@ -23,6 +25,9 @@
     "typecheck": "react-router typegen && tsc --noEmit"
   },
   "type": "module",
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
   "engines": {
     "node": ">=22.12"
   },
