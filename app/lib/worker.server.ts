@@ -17,7 +17,7 @@ import { processJob, RateLimitedError } from "./sync/process.server";
 // are processed strictly one at a time: no concurrency means no races on
 // watermarks or rate budgets, and sync volume fits comfortably.
 
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 1000;
 // If a job dies mid-flight (process crash), it reappears after this long.
 const VISIBILITY_TIMEOUT_S = 120;
 

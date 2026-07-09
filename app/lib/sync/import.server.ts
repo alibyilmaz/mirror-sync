@@ -104,7 +104,9 @@ async function stepStart(conn: Conn): Promise<void> {
       message: `Initial import started: exporting product catalogs from ${conn.sourceShop.domain} and ${conn.destShop.domain}.`,
     },
   });
-  await enqueue(QUEUES.import, { type: "initial_import", connectionId: conn.id, step: "poll" }, 15);
+  // Small catalogs finish their bulk export in seconds; poll early and
+  // often (the poll is one cheap query per side).
+  await enqueue(QUEUES.import, { type: "initial_import", connectionId: conn.id, step: "poll" }, 4);
 }
 
 async function stepPoll(conn: Conn): Promise<void> {
@@ -150,7 +152,7 @@ async function stepPoll(conn: Conn): Promise<void> {
   if (!allDone) {
     // Re-enqueue instead of throwing: polling is not a failure, it must
     // not eat retry attempts.
-    await enqueue(QUEUES.import, { type: "initial_import", connectionId: conn.id, step: "poll" }, 30);
+    await enqueue(QUEUES.import, { type: "initial_import", connectionId: conn.id, step: "poll" }, 6);
     return;
   }
   await enqueue(QUEUES.import, { type: "initial_import", connectionId: conn.id, step: "match" });

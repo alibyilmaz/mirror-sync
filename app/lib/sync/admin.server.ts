@@ -98,20 +98,45 @@ export async function graphql<T = unknown>(
   return body.data;
 }
 
+// Rate budget is kept in memory (the worker is a singleton, so this cache
+// is authoritative) and persisted to Postgres only every PERSIST_MS as a
+// restart snapshot. Before this it cost two DB round-trips per API call —
+// on a cross-region DB that alone added ~1s to every synced SKU.
+type BudgetState = {
+  available: number;
+  max: number;
+  restoreRate: number;
+  updatedAt: number;
+  lastPersist: number;
+  loaded: boolean;
+};
+const budgetCache = new Map<string, BudgetState>();
+const PERSIST_MS = 15_000;
+
 // Project the cost bucket forward from the last observed state; if it's
 // too empty, tell the worker how long to shelve the job.
 async function checkBudget(shop: string): Promise<void> {
-  const row = await prisma.shop.findUnique({
-    where: { domain: shop },
-    select: { rateAvailable: true, rateMax: true, rateRestoreRate: true, rateUpdatedAt: true },
-  });
-  if (!row?.rateAvailable || !row.rateUpdatedAt) return; // no data yet: go
-  const restore = row.rateRestoreRate ?? DEFAULT_RESTORE_RATE;
-  const max = row.rateMax ?? 1000;
-  const elapsed = (Date.now() - row.rateUpdatedAt.getTime()) / 1000;
-  const projected = Math.min(max, row.rateAvailable + elapsed * restore);
+  let b = budgetCache.get(shop);
+  if (!b) {
+    const row = await prisma.shop.findUnique({
+      where: { domain: shop },
+      select: { rateAvailable: true, rateMax: true, rateRestoreRate: true, rateUpdatedAt: true },
+    });
+    b = {
+      available: row?.rateAvailable ?? Number.POSITIVE_INFINITY,
+      max: row?.rateMax ?? 1000,
+      restoreRate: row?.rateRestoreRate ?? DEFAULT_RESTORE_RATE,
+      updatedAt: row?.rateUpdatedAt?.getTime() ?? Date.now(),
+      lastPersist: Date.now(),
+      loaded: true,
+    };
+    budgetCache.set(shop, b);
+  }
+  if (!Number.isFinite(b.available)) return; // no data yet: go
+  const elapsed = (Date.now() - b.updatedAt) / 1000;
+  const projected = Math.min(b.max, b.available + elapsed * b.restoreRate);
   if (projected < MIN_BUDGET) {
-    throw new RateLimitedError(Math.max(1, Math.ceil((MIN_BUDGET - projected) / restore)));
+    throw new RateLimitedError(Math.max(1, Math.ceil((MIN_BUDGET - projected) / b.restoreRate)));
   }
 }
 
@@ -119,15 +144,33 @@ async function saveBudget(
   shop: string,
   s: { maximumAvailable: number; currentlyAvailable: number; restoreRate: number },
 ): Promise<void> {
-  await prisma.shop.updateMany({
-    where: { domain: shop },
-    data: {
-      rateAvailable: s.currentlyAvailable,
-      rateMax: s.maximumAvailable,
-      rateRestoreRate: s.restoreRate,
-      rateUpdatedAt: new Date(),
-    },
-  });
+  const now = Date.now();
+  const prev = budgetCache.get(shop);
+  const state: BudgetState = {
+    available: s.currentlyAvailable,
+    max: s.maximumAvailable,
+    restoreRate: s.restoreRate,
+    updatedAt: now,
+    lastPersist: prev?.lastPersist ?? 0,
+    loaded: true,
+  };
+  budgetCache.set(shop, state);
+  if (now - state.lastPersist >= PERSIST_MS) {
+    state.lastPersist = now;
+    // Fire-and-forget snapshot; the in-memory state is authoritative and a
+    // lost write only costs a slightly stale restart projection.
+    prisma.shop
+      .updateMany({
+        where: { domain: shop },
+        data: {
+          rateAvailable: s.currentlyAvailable,
+          rateMax: s.maximumAvailable,
+          rateRestoreRate: s.restoreRate,
+          rateUpdatedAt: new Date(now),
+        },
+      })
+      .catch(() => {});
+  }
 }
 
 // ---------------------------------------------------------------------------
