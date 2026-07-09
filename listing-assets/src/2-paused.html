@@ -1,0 +1,121 @@
+<!doctype html><html><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;450;550;600;650&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { width:1600px; height:900px; overflow:hidden; font-family:Inter,system-ui,sans-serif;
+    background:#f8f6f1;
+    background-image:
+      radial-gradient(900px 700px at 4% -14%, rgba(13,148,136,.10), transparent 60%),
+      radial-gradient(760px 640px at 103% 8%, rgba(94,234,212,.12), transparent 58%),
+      radial-gradient(1000px 800px at 55% 125%, rgba(13,148,136,.06), transparent 62%);
+  }
+  .cap { position:absolute; top:64px; left:80px; width:560px; }
+  .brand { display:flex; align-items:center; gap:10px; margin-bottom:26px; }
+  .brand svg { width:34px; height:34px; border-radius:9px; box-shadow:0 3px 10px rgba(22,39,61,.16); }
+  .brand span { font-family:'Space Grotesk'; font-weight:600; font-size:19px; color:#16273d; letter-spacing:-.02em; }
+  .brand b { color:#0d9488; font-weight:600; }
+  h1 { font-family:'Space Grotesk'; font-weight:600; font-size:44px; line-height:1.12; letter-spacing:-.028em; color:#16273d; }
+  .sub { margin-top:16px; font-size:17.5px; line-height:1.6; color:#5c6774; max-width:470px; }
+  .win { position:absolute; right:64px; top:150px; width:880px; height:750px;
+    background:#f6f6f7; border-radius:14px 14px 0 0; overflow:hidden;
+    box-shadow:0 2px 6px rgba(22,39,61,.08), 0 30px 80px rgba(22,39,61,.18); }
+  .topbar { height:48px; background:#1a1a1a; display:flex; align-items:center; padding:0 16px; gap:14px; }
+  .topbar .mark { width:22px; height:22px; border-radius:6px; }
+  .topbar .search { flex:1; max-width:380px; margin:0 auto; height:28px; background:#303030; border-radius:8px;
+    display:flex; align-items:center; padding:0 10px; color:#9a9a9a; font-size:12.5px; gap:6px; }
+  .topbar .shop { color:#e3e3e3; font-size:12.5px; font-weight:550; margin-left:auto; display:flex; align-items:center; gap:8px; }
+  .topbar .avatar { width:24px; height:24px; border-radius:6px; background:#14b8a6; color:#04231f; font-size:11px; font-weight:700;
+    display:flex; align-items:center; justify-content:center; }
+  .appnav { height:46px; background:#fff; border-bottom:1px solid #e3e3e3; display:flex; align-items:center; padding:0 20px; gap:4px; }
+  .appnav .title { display:flex; align-items:center; gap:8px; font-weight:650; font-size:13.5px; color:#1a1a1a; margin-right:18px; }
+  .appnav .title svg { width:20px; height:20px; border-radius:5px; }
+  .appnav a { font-size:13px; color:#5c5f62; padding:6px 12px; border-radius:8px; text-decoration:none; }
+  .appnav a.on { background:#f1f1f1; color:#1a1a1a; font-weight:600; }
+  .content { padding:20px 24px; height:656px; overflow:hidden; }
+  .pagehead { font-weight:650; font-size:20px; color:#1a1a1a; margin-bottom:14px; }
+  .card { background:#fff; border-radius:12px; box-shadow:0 1px 2px rgba(0,0,0,.05), 0 0 0 1px rgba(0,0,0,.05); padding:16px 18px; margin-bottom:14px; }
+  .card h3 { font-size:14px; font-weight:650; color:#1a1a1a; margin-bottom:10px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; color:#26292c; }
+  th { text-align:left; font-weight:550; color:#6d7175; font-size:12px; padding:6px 8px; border-bottom:1px solid #ebebeb; }
+  td { padding:9px 8px; border-bottom:1px solid #f1f1f1; vertical-align:middle; }
+  tr:last-child td { border-bottom:none; }
+  .mono { font-family:ui-monospace,Consolas,monospace; font-size:12.5px; }
+  .muted { color:#6d7175; }
+  .banner { display:flex; gap:10px; border-radius:10px; padding:12px 14px; font-size:13px; line-height:1.5; margin-bottom:14px; align-items:flex-start; }
+  .banner.warn { background:#fdf3dc; color:#57430e; box-shadow:0 0 0 1px #f0dbA5 inset; }
+  .banner.ok { background:#e7f4ec; color:#0d4f34; box-shadow:0 0 0 1px #b7dfc5 inset; }
+  .dot { width:8px; height:8px; border-radius:50%; flex:none; margin-top:6px; }
+  .act { display:flex; gap:10px; padding:9px 0; border-bottom:1px solid #f1f1f1; font-size:13px; align-items:flex-start; line-height:1.5; }
+  .act:last-child { border-bottom:none; }
+  .act time { margin-left:auto; color:#8c9196; font-size:12px; white-space:nowrap; padding-left:14px; }
+</style></head><body>
+<div class="cap">
+  <div class="brand"><svg class="" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="1200" rx="140" fill="#0F1B2D"/>
+  <line x1="600" y1="320" x2="600" y2="880" stroke="rgba(255,255,255,0.28)" stroke-width="10"/>
+  <rect x="252" y="412" width="296" height="296" rx="64" fill="#14B8A6"/>
+  <rect x="663" y="423" width="274" height="274" rx="56" fill="none" stroke="#2DD4BF" stroke-width="22"/>
+  <line x1="500" y1="820" x2="660" y2="820" stroke="rgba(255,255,255,0.85)" stroke-width="16" stroke-linecap="round"/>
+  <path d="M660,784 L716,820 L660,856 Z" fill="rgba(255,255,255,0.85)"/>
+</svg><span>Mirror<b>Sync</b></span></div>
+  <h1>When something’s wrong, it tells you in plain English.</h1>
+  <p class="sub">Repeated drift or write failures pause just that SKU — with the reason spelled out and a one-click way back.</p>
+</div>
+<div class="win">
+  <div class="topbar">
+    <svg class="mark" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="1200" rx="140" fill="#0F1B2D"/>
+  <line x1="600" y1="320" x2="600" y2="880" stroke="rgba(255,255,255,0.28)" stroke-width="10"/>
+  <rect x="252" y="412" width="296" height="296" rx="64" fill="#14B8A6"/>
+  <rect x="663" y="423" width="274" height="274" rx="56" fill="none" stroke="#2DD4BF" stroke-width="22"/>
+  <line x1="500" y1="820" x2="660" y2="820" stroke="rgba(255,255,255,0.85)" stroke-width="16" stroke-linecap="round"/>
+  <path d="M660,784 L716,820 L660,856 Z" fill="rgba(255,255,255,0.85)"/>
+</svg>
+    <div class="search">⌕&nbsp; Search</div>
+    <div class="shop"><span>mirror-sync-dest</span><span class="avatar">MD</span></div>
+  </div>
+  <div class="appnav">
+    <span class="title"><svg class="" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="1200" rx="140" fill="#0F1B2D"/>
+  <line x1="600" y1="320" x2="600" y2="880" stroke="rgba(255,255,255,0.28)" stroke-width="10"/>
+  <rect x="252" y="412" width="296" height="296" rx="64" fill="#14B8A6"/>
+  <rect x="663" y="423" width="274" height="274" rx="56" fill="none" stroke="#2DD4BF" stroke-width="22"/>
+  <line x1="500" y1="820" x2="660" y2="820" stroke="rgba(255,255,255,0.85)" stroke-width="16" stroke-linecap="round"/>
+  <path d="M660,784 L716,820 L660,856 Z" fill="rgba(255,255,255,0.85)"/>
+</svg>mirror-sync</span>
+    <a class="">Overview</a><a class="">Connections</a><a class="on">Health</a>
+  </div>
+  <div class="content">
+      <div class="pagehead">Health</div>
+      <div class="banner warn"><span style="font-size:15px">⚠</span>
+        <span><b>Sync paused for SKU SYNC-CAP:</b> its stock at mirror-sync-dest.myshopify.com drifted away 3 hours in a row (last: 999 instead of 42). Another app or a manual edit is probably changing it. Fixed it one more time, but review it, then use “Resync now”.</span>
+      </div>
+      <div class="card">
+        <h3>Paused SKUs</h3>
+        <table>
+          <tr><th>SKU</th><th>Status</th><th>Reason</th><th>When</th><th></th></tr>
+          <tr>
+            <td class="mono">SYNC-CAP</td>
+            <td><span style="display:inline-block;background:#fdf3dc;color:#8a6116;font-size:12.5px;font-weight:550;padding:3px 10px;border-radius:20px;white-space:nowrap;">paused</span></td>
+            <td class="muted" style="max-width:330px">Inventory drifted 3 reconciliations in a row — something else appears to be changing stock</td>
+            <td class="muted">19 min ago</td>
+            <td style="text-align:right"><span style="display:inline-block;padding:8px 16px;border-radius:8px;font-size:13.5px;font-weight:600;cursor:default;background:#fff;color:#26292c;border:1px solid #d0d3d6;box-shadow:0 1px 0 rgba(0,0,0,0.05);">Resync now</span></td>
+          </tr>
+        </table>
+      </div>
+      <div class="card">
+        <h3>Failed jobs</h3>
+        <p class="muted" style="font-size:12.5px;margin-bottom:8px;">Retrying is safe: each job re-checks the current numbers before writing anything.</p>
+        <table>
+          <tr><th>Queue</th><th>Error</th><th>Attempts</th><th></th></tr>
+          <tr>
+            <td><span style="display:inline-block;background:#f1f1f1;color:#5c5f62;font-size:12.5px;font-weight:550;padding:3px 10px;border-radius:20px;white-space:nowrap;">Sync</span></td>
+            <td class="muted">inventorySetQuantities failed: Inventory item not stocked at location</td>
+            <td>5</td>
+            <td style="text-align:right"><span style="display:inline-block;padding:8px 16px;border-radius:8px;font-size:13.5px;font-weight:600;cursor:default;background:#fff;color:#26292c;border:1px solid #d0d3d6;box-shadow:0 1px 0 rgba(0,0,0,0.05);">Retry</span></td>
+          </tr>
+        </table>
+      </div></div>
+</div>
+</body></html>
