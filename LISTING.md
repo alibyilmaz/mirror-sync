@@ -32,16 +32,17 @@ Inventory sync that finds and fixes drift automatically
 Keep stock aligned across your stores with self-healing sync that finds and repairs drift for you.
 ```
 
-## App details (≤500 chars — main description)
+## App details (≤500 chars — main description; this text = 488 chars
+## when pasted as one paragraph)
 
 ```
 MirrorSync mirrors inventory and product data from one store to another in
 near real time — and keeps checking afterwards. Every hour it compares both
-stores SKU by SKU, repairs any drift it finds, and writes a plain-language
-log of what changed and why. If stock keeps drifting or a product breaks,
-the SKU pauses safely and one click fixes it. A safety stock buffer helps
-protect you from overselling during restocks and flash sales. Built for
-multi-brand operators, expansion stores, and supplier-retailer partnerships.
+stores SKU by SKU, repairs any drift it finds, and logs every fix in plain
+language. If stock keeps drifting or a product breaks, that SKU pauses
+safely and one click fixes it. A safety stock buffer helps protect you from
+overselling during restocks. Built for multi-brand operators, expansion
+stores, and supplier-retailer partnerships.
 ```
 
 ## Features (~80 chars each)
