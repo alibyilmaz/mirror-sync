@@ -6,10 +6,12 @@ application_url = "https://mirror-sync-production.up.railway.app"
 embedded = true
 
 [build]
-# Let `shopify app dev` point the app at the tunnel/preview URL each run
-# instead of the placeholder application_url above (which is why the
-# embedded app was loading "Example Domain").
-automatically_update_urls_on_dev = true
+# Development is over: dev runs must NOT re-point the app at a tunnel
+# (a killed dev session leaves the URL on a dead tunnel and breaks the
+# embedded app for every store). If you need embedded dev again, flip this
+# to true for the session and re-run `shopify app deploy` afterwards —
+# and note `shopify app dev clean --store=<store>` clears a stuck preview.
+automatically_update_urls_on_dev = false
 dev_store_url = "mirror-sync-dest.myshopify.com"
 
 [access_scopes]
