@@ -1,5 +1,6 @@
+import { useEffect } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useFetcher, useLoaderData } from "react-router";
+import { useFetcher, useLoaderData, useRevalidator } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
@@ -62,6 +63,21 @@ export default function Connections() {
   const { shopDomain, asSource, asDest } = useLoaderData<typeof loader>();
   const generate = useFetcher<typeof action>();
   const redeem = useFetcher<typeof action>();
+
+  // While any connection is importing, poll so the merchant watches
+  // "Matching products…" flip to the final state without touching refresh.
+  const revalidator = useRevalidator();
+  const importing = [...asSource, ...asDest].some((c) => c.status === "importing");
+  useEffect(() => {
+    if (!importing) return;
+    const timer = setInterval(() => {
+      if (revalidator.state === "idle") revalidator.revalidate();
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [importing, revalidator]);
+
+  const skuCell = (c: { status: string; mappingCount: number }) =>
+    c.status === "importing" ? "Matching products…" : String(c.mappingCount);
 
   return (
     <s-page heading="Connections">
@@ -134,7 +150,7 @@ export default function Connections() {
                   <s-table-cell>→ sends to</s-table-cell>
                   <s-table-cell>{c.otherShop}</s-table-cell>
                   <s-table-cell>{c.status}</s-table-cell>
-                  <s-table-cell>{String(c.mappingCount)}</s-table-cell>
+                  <s-table-cell>{skuCell(c)}</s-table-cell>
                 </s-table-row>
               ))}
               {asDest.map((c) => (
@@ -142,7 +158,7 @@ export default function Connections() {
                   <s-table-cell>← receives from</s-table-cell>
                   <s-table-cell>{c.otherShop}</s-table-cell>
                   <s-table-cell>{c.status}</s-table-cell>
-                  <s-table-cell>{String(c.mappingCount)}</s-table-cell>
+                  <s-table-cell>{skuCell(c)}</s-table-cell>
                 </s-table-row>
               ))}
             </s-table-body>

@@ -197,6 +197,13 @@ async function stepMatch(conn: Conn): Promise<void> {
   let unmatched = 0;
   let ambiguous = 0;
 
+  // Match entirely in memory first. Writes happen in ONE transaction below,
+  // so the dashboard never sees a half-written mapping table (the SKU count
+  // jumps from "matching…" straight to the final number, together with the
+  // status flip and the audit entry).
+  type MatchedRow = { sv: CatalogVariant; dv: CatalogVariant; matchType: string };
+  const matched: MatchedRow[] = [];
+
   for (const sv of sourceCatalog) {
     const skuKey = normalize(sv.sku);
     const barcodeKey = normalize(sv.barcode);
@@ -224,62 +231,66 @@ async function stepMatch(conn: Conn): Promise<void> {
     }
     if (matchType === "auto_sku") matchedSku++;
     else matchedBarcode++;
-
-    // Manual mappings survive re-imports untouched — and the check must be
-    // at write time, not against a pre-loop snapshot, or a manual-map
-    // saved from the dashboard mid-import gets clobbered by the auto-match.
-    // updateMany re-reads matchType now; createMany(skipDuplicates) leaves
-    // any existing manual row alone.
-    const updated = await prisma.mapping.updateMany({
-      where: {
-        connectionId: conn.id,
-        sourceVariantId: sv.variantId,
-        matchType: { not: "manual" },
-      },
-      data: {
-        sku: sv.sku,
-        barcode: sv.barcode,
-        sourceProductId: sv.productId,
-        sourceInventoryItemId: sv.inventoryItemId,
-        destProductId: dv.productId,
-        destVariantId: dv.variantId,
-        destInventoryItemId: dv.inventoryItemId,
-        matchType,
-      },
-    });
-    if (updated.count === 0) {
-      await prisma.mapping.createMany({
-        data: [
-          {
-            connectionId: conn.id,
-            sku: sv.sku,
-            barcode: sv.barcode,
-            sourceProductId: sv.productId,
-            sourceVariantId: sv.variantId,
-            sourceInventoryItemId: sv.inventoryItemId,
-            destProductId: dv.productId,
-            destVariantId: dv.variantId,
-            destInventoryItemId: dv.inventoryItemId,
-            matchType,
-          },
-        ],
-        skipDuplicates: true,
-      });
-    }
+    matched.push({ sv, dv, matchType });
   }
 
   await autoLinkLocations(conn);
 
+  // Split into creates vs updates against the current table. Manual
+  // mappings are still protected at WRITE time (the updateMany guard),
+  // so a manual-map saved mid-import can't be clobbered.
+  const existing = await prisma.mapping.findMany({
+    where: { connectionId: conn.id },
+    select: { sourceVariantId: true, matchType: true, status: true },
+  });
+  const existingByVid = new Map(existing.map((e) => [e.sourceVariantId.toString(), e]));
+  const rowData = ({ sv, dv, matchType }: MatchedRow) => ({
+    sku: sv.sku,
+    barcode: sv.barcode,
+    sourceProductId: sv.productId,
+    sourceInventoryItemId: sv.inventoryItemId,
+    destProductId: dv.productId,
+    destVariantId: dv.variantId,
+    destInventoryItemId: dv.inventoryItemId,
+    matchType,
+  });
+  const creates = matched
+    .filter((m) => !existingByVid.has(m.sv.variantId.toString()))
+    .map((m) => ({ connectionId: conn.id, sourceVariantId: m.sv.variantId, ...rowData(m) }));
+  const updates = matched.filter((m) => {
+    const e = existingByVid.get(m.sv.variantId.toString());
+    return e && e.matchType !== "manual";
+  });
+  const updateStatements = updates.map((m) =>
+    prisma.mapping.updateMany({
+      where: { connectionId: conn.id, sourceVariantId: m.sv.variantId, matchType: { not: "manual" } },
+      data: rowData(m),
+    }),
+  );
+
   // Plan limit is enforced where mappings are born (here and at manual
   // mapping): over the cap, the connection pauses instead of half-syncing.
   const planCheck = await checkPlanLimit(conn.sourceShop.domain);
-  if (planCheck.over) {
+  const projectedUsed = planCheck.used + creates.length;
+
+  // A re-import refreshes mapping targets but deliberately does NOT revive
+  // SKUs that were auto-paused (write failures / drift) — that needs the
+  // merchant's explicit "Resync now". Say so, or the pause looks like a bug.
+  const stillPaused = existing.filter((e) => e.status === "paused").length;
+
+  const mappingWrites = [
+    prisma.mapping.createMany({ data: creates, skipDuplicates: true }),
+    ...updateStatements,
+  ];
+
+  if (projectedUsed > planCheck.limit) {
     await prisma.$transaction([
+      ...mappingWrites,
       prisma.connection.update({
         where: { id: conn.id },
         data: {
           status: "paused",
-          pausedReason: `Plan limit: ${planCheck.used} SKUs matched, the ${planCheck.plan} plan covers ${planCheck.limit}`,
+          pausedReason: `Plan limit: ${projectedUsed} SKUs matched, the ${planCheck.plan} plan covers ${planCheck.limit}`,
         },
       }),
       prisma.auditLog.create({
@@ -288,21 +299,15 @@ async function stepMatch(conn: Conn): Promise<void> {
           shopDomain: conn.sourceShop.domain,
           level: "warn",
           kind: "import",
-          message: `Matching found ${planCheck.used} SKUs, but the ${planCheck.plan} plan covers ${planCheck.limit}. Sync is paused — upgrade the plan (Overview page) or unlink SKUs, then use "Resync now".`,
+          message: `Matching found ${projectedUsed} SKUs, but the ${planCheck.plan} plan covers ${planCheck.limit}. Sync is paused — upgrade the plan (Overview page) or unlink SKUs, then use "Resync now".`,
         },
       }),
     ]);
     return;
   }
 
-  // A re-import refreshes mapping targets but deliberately does NOT revive
-  // SKUs that were auto-paused (write failures / drift) — that needs the
-  // merchant's explicit "Resync now". Say so, or the pause looks like a bug.
-  const stillPaused = await prisma.mapping.count({
-    where: { connectionId: conn.id, status: "paused" },
-  });
-
   await prisma.$transaction([
+    ...mappingWrites,
     prisma.connection.update({ where: { id: conn.id }, data: { status: "active" } }),
     prisma.auditLog.create({
       data: {

@@ -1,5 +1,6 @@
+import { useEffect } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useRevalidator } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
@@ -141,6 +142,18 @@ export default function Index() {
 
   const needsAttention = pausedSkus > 0 || failedJobs > 0;
 
+  // Live-refresh while an import is matching so the SKU count appears the
+  // moment it lands instead of looking stuck at 0.
+  const revalidator = useRevalidator();
+  const importing = connections.some((c) => c.status === "importing");
+  useEffect(() => {
+    if (!importing) return;
+    const timer = setInterval(() => {
+      if (revalidator.state === "idle") revalidator.revalidate();
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [importing, revalidator]);
+
   if (connections.length === 0) {
     return (
       <s-page heading="MirrorSync">
@@ -183,7 +196,9 @@ export default function Index() {
             <s-badge tone={STATUS_TONE[c.status] ?? "neutral"}>
               {STATUS_LABEL[c.status] ?? c.status}
             </s-badge>
-            <s-text>{String(c.mappingCount)} SKUs</s-text>
+            <s-text>
+              {c.status === "importing" ? "Matching products…" : `${c.mappingCount} SKUs`}
+            </s-text>
             <s-link href={`/app/mappings/${c.id}`}>View SKUs</s-link>
             <s-link href={`/app/settings/${c.id}`}>Settings</s-link>
           </s-stack>
