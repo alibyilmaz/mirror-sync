@@ -15,7 +15,7 @@ export const PLANS: Record<string, { label: string; skuLimit: number }> = {
 
 // App handle as configured in shopify.app.toml / Dev Dashboard; used for
 // the hosted upgrade page URL.
-export const APP_HANDLE = "mirrorsync";
+export const APP_HANDLE = "mirror-sync";
 
 export function upgradeUrl(shopDomain: string): string {
   const store = shopDomain.replace(".myshopify.com", "");
