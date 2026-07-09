@@ -38,7 +38,37 @@ const btn = (label, primary = false) =>
       : "background:#fff;color:#26292c;border:1px solid #d0d3d6;box-shadow:0 1px 0 rgba(0,0,0,0.05);"
   }">${label}</span>`;
 
-function page(caption, sub, appNavActive, contentHtml) {
+function page(caption, sub, appNavActive, contentHtml, feature = false) {
+  // Two layouts. "screen": caption strip on the left, big admin window on
+  // the right. "feature": slim brand band on top, near-full-width window —
+  // Shopify's listing check rejects images dominated by logo/illustration,
+  // the app UI must clearly communicate functionality.
+  const layout = feature
+    ? `
+  .cap { position:absolute; top:34px; left:64px; right:64px; display:flex; align-items:center; gap:18px; }
+  .brand { display:flex; align-items:center; gap:10px; }
+  .brand svg { width:30px; height:30px; border-radius:8px; box-shadow:0 3px 10px rgba(22,39,61,.16); }
+  .brand span { font-family:'Space Grotesk'; font-weight:600; font-size:17px; color:#16273d; letter-spacing:-.02em; }
+  .brand b { color:#0d9488; font-weight:600; }
+  h1 { font-family:'Space Grotesk'; font-weight:600; font-size:26px; letter-spacing:-.02em; color:#16273d; }
+  .sub { display:none; }
+  .win { position:absolute; left:64px; right:64px; top:104px; height:796px;
+    background:#f6f6f7; border-radius:14px 14px 0 0; overflow:hidden;
+    box-shadow:0 2px 6px rgba(22,39,61,.08), 0 30px 80px rgba(22,39,61,.18); }
+  .content { padding:20px 28px; height:702px; overflow:hidden; }`
+    : `
+  .cap { position:absolute; top:52px; left:56px; width:380px; }
+  .brand { display:flex; align-items:center; gap:10px; margin-bottom:20px; }
+  .brand svg { width:30px; height:30px; border-radius:8px; box-shadow:0 3px 10px rgba(22,39,61,.16); }
+  .brand span { font-family:'Space Grotesk'; font-weight:600; font-size:17px; color:#16273d; letter-spacing:-.02em; }
+  .brand b { color:#0d9488; font-weight:600; }
+  h1 { font-family:'Space Grotesk'; font-weight:600; font-size:33px; line-height:1.15; letter-spacing:-.024em; color:#16273d; }
+  .sub { margin-top:13px; font-size:15px; line-height:1.6; color:#5c6774; max-width:350px; }
+  .win { position:absolute; right:40px; top:96px; width:1120px; height:804px;
+    background:#f6f6f7; border-radius:14px 14px 0 0; overflow:hidden;
+    box-shadow:0 2px 6px rgba(22,39,61,.08), 0 30px 80px rgba(22,39,61,.18); }
+  .content { padding:20px 28px; height:710px; overflow:hidden; }`;
+
   return `<!doctype html><html><head><meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;450;550;600;650&display=swap" rel="stylesheet">
@@ -51,16 +81,7 @@ function page(caption, sub, appNavActive, contentHtml) {
       radial-gradient(760px 640px at 103% 8%, rgba(94,234,212,.12), transparent 58%),
       radial-gradient(1000px 800px at 55% 125%, rgba(13,148,136,.06), transparent 62%);
   }
-  .cap { position:absolute; top:64px; left:80px; width:560px; }
-  .brand { display:flex; align-items:center; gap:10px; margin-bottom:26px; }
-  .brand svg { width:34px; height:34px; border-radius:9px; box-shadow:0 3px 10px rgba(22,39,61,.16); }
-  .brand span { font-family:'Space Grotesk'; font-weight:600; font-size:19px; color:#16273d; letter-spacing:-.02em; }
-  .brand b { color:#0d9488; font-weight:600; }
-  h1 { font-family:'Space Grotesk'; font-weight:600; font-size:44px; line-height:1.12; letter-spacing:-.028em; color:#16273d; }
-  .sub { margin-top:16px; font-size:17.5px; line-height:1.6; color:#5c6774; max-width:470px; }
-  .win { position:absolute; right:64px; top:150px; width:880px; height:750px;
-    background:#f6f6f7; border-radius:14px 14px 0 0; overflow:hidden;
-    box-shadow:0 2px 6px rgba(22,39,61,.08), 0 30px 80px rgba(22,39,61,.18); }
+  ${layout}
   .topbar { height:48px; background:#1a1a1a; display:flex; align-items:center; padding:0 16px; gap:14px; }
   .topbar .mark { width:22px; height:22px; border-radius:6px; }
   .topbar .search { flex:1; max-width:380px; margin:0 auto; height:28px; background:#303030; border-radius:8px;
@@ -73,7 +94,6 @@ function page(caption, sub, appNavActive, contentHtml) {
   .appnav .title svg { width:20px; height:20px; border-radius:5px; }
   .appnav a { font-size:13px; color:#5c5f62; padding:6px 12px; border-radius:8px; text-decoration:none; }
   .appnav a.on { background:#f1f1f1; color:#1a1a1a; font-weight:600; }
-  .content { padding:20px 24px; height:656px; overflow:hidden; }
   .pagehead { font-weight:650; font-size:20px; color:#1a1a1a; margin-bottom:14px; }
   .card { background:#fff; border-radius:12px; box-shadow:0 1px 2px rgba(0,0,0,.05), 0 0 0 1px rgba(0,0,0,.05); padding:16px 18px; margin-bottom:14px; }
   .card h3 { font-size:14px; font-weight:650; color:#1a1a1a; margin-bottom:10px; }
@@ -149,6 +169,26 @@ const feedHtml = (rows) =>
     .join("");
 
 const screens = {
+  // Feature image: UI-dominant by design — Shopify's check rejects
+  // logo/illustration-only feature images.
+  "0-feature": {
+    caption: "Inventory sync that checks itself — and shows its work.",
+    sub: "",
+    nav: "Health",
+    feature: true,
+    html: `
+      <div class="pagehead">Health</div>
+      <div class="card" style="display:flex;align-items:center;gap:12px;">
+        <span style="font-size:13.5px;">Receives inventory from <span class="mono">mirror-sync.myshopify.com</span></span>
+        ${badge("success", "Active")}
+        <span style="margin-left:auto">${btn("Resync now", true)}</span>
+      </div>
+      <div class="card">
+        <h3>Activity</h3>
+        ${feedHtml(HEALTH_FEED)}
+      </div>`,
+  },
+
   "1-health": {
     caption: "It checks itself every hour — and fixes what it finds.",
     sub: "Hourly reconciliation compares both stores SKU by SKU and repairs any drift — with every fix written in plain language.",
@@ -204,7 +244,7 @@ const screens = {
   },
 
   "3-connect": {
-    caption: "Connect two stores in under a minute.",
+    caption: "Connect two stores with a one-time code.",
     sub: "Generate a one-time code on the source store, enter it on the destination — import and SKU matching start automatically.",
     nav: "Connections",
     html: `
@@ -264,7 +304,7 @@ const screens = {
 
   "5-settings": {
     caption: "Sync exactly what you want — nothing more.",
-    sub: "Inventory is the core. Titles, prices, tags and metafields are opt-in — and a safety buffer keeps restocks from overselling.",
+    sub: "Inventory is the core. Titles, prices, tags and metafields are opt-in — and a safety stock buffer keeps a margin during restocks.",
     nav: "Connections",
     html: `
       <div class="pagehead">Sync settings — mirror-sync → mirror-sync-dest</div>
@@ -317,7 +357,7 @@ const screens = {
 // ---------------------------------------------------------------------------
 
 for (const [name, s] of Object.entries(screens)) {
-  writeFileSync(resolve(SRC, `${name}.html`), page(s.caption, s.sub, s.nav, s.html));
+  writeFileSync(resolve(SRC, `${name}.html`), page(s.caption, s.sub, s.nav, s.html, s.feature ?? false));
 }
 console.log("HTML written:", Object.keys(screens).join(", "));
 

@@ -19,13 +19,17 @@ Reliable inventory & product sync across all your stores
 Alternative (harder reliability angle):
 
 ```
-Inventory sync that catches drift and prevents overselling
+Inventory sync that finds and fixes drift automatically
 ```
+
+> Compliance note (Shopify's listing AI check): no statistics or absolute
+> claims — avoid "never oversells", "quantities never go negative",
+> "guaranteed", "under 30 seconds". Copy below is mechanism-based.
 
 ## App introduction (≤100 chars — top of the listing page)
 
 ```
-Keep stock identical across your stores. Self-healing sync that catches drift and never oversells.
+Keep stock aligned across your stores with self-healing sync that finds and repairs drift for you.
 ```
 
 ## App details (≤500 chars — main description)
@@ -33,19 +37,19 @@ Keep stock identical across your stores. Self-healing sync that catches drift an
 ```
 MirrorSync mirrors inventory and product data from one store to another in
 near real time — and keeps checking afterwards. Every hour it compares both
-stores SKU by SKU, repairs any drift, and writes a plain-language log of what
-changed and why. If stock keeps drifting or a product breaks, the SKU pauses
-safely and one click fixes it. A safety buffer keeps you from overselling
-during restocks and flash sales. Built for multi-brand operators, expansion
-stores, and supplier-retailer partnerships.
+stores SKU by SKU, repairs any drift it finds, and writes a plain-language
+log of what changed and why. If stock keeps drifting or a product breaks,
+the SKU pauses safely and one click fixes it. A safety stock buffer helps
+protect you from overselling during restocks and flash sales. Built for
+multi-brand operators, expansion stores, and supplier-retailer partnerships.
 ```
 
 ## Features (~80 chars each)
 
-1. Near real-time inventory sync — typically under 30 seconds, guaranteed convergence
-2. Hourly drift detection & self-repair: catches changes even when webhooks are missed
-3. Oversell guard: safety stock buffer, quantities never go negative
-4. Catches stock changes made by ANY app or manual edit — not just orders
+1. Fast inventory sync — updates flow to the mirrored store moments after a change
+2. Hourly drift detection and self-repair — catches changes even when a webhook is missed
+3. Oversell guard: a safety stock buffer keeps a margin between your stores
+4. Syncs stock changes from other apps and manual edits — not just orders
 5. Plain-language audit log + one-click resync when something needs attention
 6. Optional product sync: title, price, tags, images, and metafields by namespace
 7. SKU/barcode auto-matching on connect, with manual override for edge cases
@@ -55,6 +59,12 @@ stores, and supplier-retailer partnerships.
 ```
 inventory sync, multi store, sync stores, stock sync, connect stores
 ```
+
+## Images (1600×900) — generated in `listing-assets/`
+
+**Feature Image 1** → use `0-feature.png` (UI-dominant Health screen; the
+check rejects logo/illustration-only feature images — do NOT use the OG or
+app-icon file there).
 
 ## Screenshots (1600×900, 3–6) — capture scenarios
 
@@ -68,7 +78,7 @@ mock data looks bad in Built for Shopify review.
    row…` warning + Resync now button. Overlay: *"When something's wrong, it
    tells you in plain English."*
 3. **Connect flow:** the pairing code screen. Overlay: *"Connect two stores
-   in under a minute."*
+   with a one-time code."*
 4. **Mapping table:** auto-matched SKUs with auto_sku / auto_barcode / manual
    badges. Overlay: *"SKUs match themselves. You approve the edge cases."*
 5. **Settings:** safety buffer + field-selective sync. Overlay: *"Sync exactly
