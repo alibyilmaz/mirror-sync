@@ -103,9 +103,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }),
     ]);
 
-  // Refresh the managed-pricing plan while the merchant is looking at us;
-  // falls back to the cached value if the API call fails.
-  const plan = await refreshPlan(session.shop);
+  // Managed-pricing plan: render the cached value and refresh in the
+  // background — blocking the loader on a Shopify Admin API round-trip
+  // added ~0.5s to every Overview load for data that changes ~never.
+  void refreshPlan(session.shop).catch(() => {});
+  const plan = shop?.plan ?? "free";
 
   const limit = skuLimitFor(plan);
 

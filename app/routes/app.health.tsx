@@ -62,10 +62,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const connectionIds = connections.map((c) => c.id);
 
-  const pausedMappings =
+  // Only this store's failures — connection-scoped jobs are attributed to
+  // the source shop, so include domains from both sides of our connections.
+  const visibleDomains = [
+    session.shop,
+    ...connections.map((c) => c.otherShop),
+  ];
+
+  // Independent queries: run them in parallel (each is a cross-region
+  // round-trip; sequential awaits made this the slowest page).
+  const [pausedMappings, auditLogs, deadLetters] = await Promise.all([
     connectionIds.length === 0
-      ? []
-      : await db.mapping.findMany({
+      ? Promise.resolve([])
+      : db.mapping.findMany({
           where: {
             connectionId: { in: connectionIds },
             status: { in: ["paused", "broken"] },
@@ -80,32 +89,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           },
           orderBy: { pausedAt: "desc" },
           take: 100,
-        });
-
-  const auditLogs = await db.auditLog.findMany({
-    where: {
-      OR: [
-        { shopDomain: session.shop },
-        ...(connectionIds.length > 0 ? [{ connectionId: { in: connectionIds } }] : []),
-      ],
-    },
-    select: { id: true, level: true, kind: true, message: true, createdAt: true },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-  });
-
-  // Only this store's failures — connection-scoped jobs are attributed to
-  // the source shop, so include domains from both sides of our connections.
-  const visibleDomains = [
-    session.shop,
-    ...connections.map((c) => c.otherShop),
-  ];
-  const deadLetters = await db.deadLetter.findMany({
-    where: { status: "dead", shopDomain: { in: visibleDomains } },
-    select: { id: true, queue: true, error: true, attempts: true, failedAt: true },
-    orderBy: { failedAt: "desc" },
-    take: 50,
-  });
+        }),
+    db.auditLog.findMany({
+      where: {
+        OR: [
+          { shopDomain: session.shop },
+          ...(connectionIds.length > 0 ? [{ connectionId: { in: connectionIds } }] : []),
+        ],
+      },
+      select: { id: true, level: true, kind: true, message: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    }),
+    db.deadLetter.findMany({
+      where: { status: "dead", shopDomain: { in: visibleDomains } },
+      select: { id: true, queue: true, error: true, attempts: true, failedAt: true },
+      orderBy: { failedAt: "desc" },
+      take: 50,
+    }),
+  ]);
 
   return {
     connections,
