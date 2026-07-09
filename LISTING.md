@@ -95,6 +95,64 @@ mock data looks bad in Built for Shopify review.
 
 Names are case-insensitive matched to `free` / `starter` / `growth` / `scale`.
 
+## Testing instructions (paste into "Instruction notes", ≤2800 chars)
+
+```
+MirrorSync is fully embedded — no external login or credentials needed.
+It authenticates automatically with the Shopify session on install.
+
+SETUP (needs two development stores):
+1. Install the app on two dev stores: Store A (source) and Store B
+   (destination).
+2. In both stores, create 2–3 products that share the same SKU (or the
+   same barcode) — matching is by SKU first, then barcode.
+3. Open the app on Store A > Connections > "Generate connection code".
+4. Open the app on Store B > Connections > enter the code under "Receive
+   inventory INTO this store" > Connect.
+5. The initial import starts automatically: both catalogs are exported,
+   variants are matched, and Store B's stock is set to match Store A.
+   Progress and results appear on the Health page (~1–2 minutes).
+
+CORE FUNCTIONALITY:
+6. Real-time sync: in Store A admin, change the inventory of a matched
+   SKU. Within ~30 seconds Store B shows the same quantity.
+7. Self-healing: in Store B admin, manually change a synced SKU's stock
+   (simulates another app interfering). Click "Resync now" on the Health
+   page — the value is corrected back and a plain-language entry appears
+   in the activity log ("Drift repaired for SKU ..."). This also runs
+   automatically every hour.
+8. Oversell guard: open Settings for the connection (source store),
+   set "Safety stock buffer" to 5, save, then "Resync now" on Health.
+   Store B now shows Store A's stock minus 5, and never goes below 0.
+9. SKU mapping page: shows every matched pair with its match type
+   (auto-SKU / auto-barcode / manual), plus pause/resume per SKU and a
+   manual mapping form for products whose SKUs differ between stores.
+
+NOTES:
+- "Resync now" triggers the hourly reconciliation immediately, so you
+  never need to wait for the scheduled run.
+- The app requests only product/inventory/location scopes and stores no
+  customer data; all three GDPR compliance webhooks are implemented.
+- The Free plan covers 25 synced SKUs (managed pricing) — no charge is
+  required to test everything above.
+```
+
+## Screencast script (3–4 min, one take — Loom or YouTube unlisted)
+
+| # | ~Time | Scene | Say / show |
+|---|-------|-------|------------|
+| 1 | 0:00–0:20 | Landing + install | "MirrorSync keeps inventory identical across your Shopify stores." Show app opening in admin (embedded, no login). |
+| 2 | 0:20–1:00 | Onboarding: pairing | Store A: Connections → Generate code. Store B: paste code → Connect. Show the success banner. |
+| 3 | 1:00–1:40 | Import + mapping | Health page while import runs; then SKU mapping page: auto-SKU, auto-barcode and manual badges. "SKUs match themselves — you approve the edge cases." |
+| 4 | 1:40–2:20 | Live sync | Store A admin: change a SKU's stock. Switch to Store B: value updates in seconds. |
+| 5 | 2:20–3:10 | Self-healing (the differentiator) | Store B: manually break the stock (e.g. set 999). Health → Resync now → show the "Drift repaired… had 999, corrected to…" audit line. "It checks itself every hour and writes what it fixed in plain English." |
+| 6 | 3:10–3:40 | Oversell guard | Settings: set buffer 5 → resync → Store B shows source minus 5. "Restocks and flash sales can't oversell the mirrored store." |
+| 7 | 3:40–4:00 | Close | Plans (Free = 25 SKUs), logo, tagline: "Sync you don't have to think about." |
+
+Recording tips: 1600×900+ window, English UI, quiet room (their DON'T:
+no loud background noise), cursor visible. Host on Loom (public link) or
+YouTube (unlisted) and paste the URL into "Screencast URL".
+
 ## Two assurance lines for the help doc
 
 - "Even if Shopify drops or coalesces a webhook, the hourly reconciliation
